@@ -13,6 +13,15 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s]: %(m
 logger = logging.getLogger()
 s3 = boto3.client('s3')
 
+schema = {
+    "required_columns": [
+       "transaction_id","store_id", "product_id", "quantity", 
+       "revenue", "discount_applied", "timestamp" 
+    ],
+    "not_nulls": ["transaction_id","store_id", "product_id", "quantity", 
+       "revenue", "timestamp" ]
+}
+
 def list_files(bucket, prefix=""):
     """Return a list of files for a given prefix in an S3 bucket."""
     try:
@@ -32,12 +41,14 @@ def list_files(bucket, prefix=""):
 
 def validate_file():
      pass
-def main(event, context):
+def main():
     file_available = list_files(bucket_name, "POS")
 
     if len(file_available) == 0:
         logger.info(f"No files available in the bucket to validate")
         return
+    
+
     
 
 
