@@ -11,7 +11,7 @@ KINESIS_STREAM_NAME = os.getenv("KINESIS_STREAM_NAME")
 ERROR_S3_BUCKET = os.getenv("ERROR_S3_BUCKET")  # S3 bucket for error records
 FAILED_RECORDS_SNS_ARN = os.getenv("FAILED_RECORDS_SNS_ARN")  # SNS Topic ARN for notifications
 REGION = os.getenv("AWS_REGION")
-POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", 10))
+POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", 6))
 MAX_RETRIES = 5
 
 # Setup logging
