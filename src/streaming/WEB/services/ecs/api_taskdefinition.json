@@ -1,5 +1,5 @@
 {
-  "family": "weblogs-api-family",
+  "family": "weblogs-api",
   "networkMode": "awsvpc",
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "512",
