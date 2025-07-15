@@ -4,6 +4,7 @@ import boto3
 import logging
 from dotenv import load_dotenv
 from botocore.exceptions import BotoCoreError, ClientError
+from io import StringIO
 # Load env variables from .env file
 load_dotenv()
 bucket_name = os.getenv("AWS_S3_BUCKET")
@@ -39,18 +40,59 @@ def list_files(bucket, prefix=""):
         logger.error(f"Error listing files from S3: {e}")
         return []
 
-def validate_file():
-     pass
-def main():
-    file_available = list_files(bucket_name, "POS")
+def download_from_s3(s3_uri):
+    """ Download a CSV file from S3 and load it into a Pandas DataFrame """
+    s3 = boto3.client("s3")
+    try:
+        bucket, key = s3_uri.replace("s3://", "").split("/", 1)
+        logging.info(f"Downloading file from {s3_uri}")
+        obj = s3.get_object(Bucket=bucket, Key=key)
+        data = obj['Body'].read().decode('utf-8')
+        return pd.read_csv(StringIO(data))
+    except Exception as error:
+        logger.error(f"Error reading file {key}: {error}")
+        return None
 
-    if len(file_available) == 0:
+def validate_file(df, filename):
+    """Validate a DataFrame against the defined schema"""
+    logger.info(f"Validating file: {filename}")
+
+    # check required columns
+    missing_cols = set(schema["required_columns"]) - set(df.columns)
+    if missing_cols:
+        logger.error(f"Validation failed for {filename}: missing required columns: {missing_cols}")
+        return False
+
+    # check for not-null columns
+    for col in schema["not_nulls"]:
+        if df[col].isnull().any():
+            logger.error(f"Validation failed for {filename}: column '{col}' contains null values")
+            return False
+        
+    logger.info(f"File '{filename}' passed validation")
+    return True
+    
+
+         
+
+def main():
+    if not bucket_name:
+        logger.error("AWS_S3_BUCKET environment variable is not set.")
+        return
+    
+    files = list_files(bucket_name, "POS")
+
+    if len(files) == 0:
         logger.info(f"No files available in the bucket to validate")
         return
+    
+    for file in files:
+        df = download_from_s3(f"s3://{bucket_name}/{file}")
+        validate_file(df, file)
     
 
     
 
 
 if "__main__" == __name__:
-    main(event={}, context={})
+    main()
