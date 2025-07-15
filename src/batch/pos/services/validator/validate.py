@@ -73,8 +73,6 @@ def validate_file(df, filename):
     return True
     
 
-         
-
 def main():
     if not bucket_name:
         logger.error("AWS_S3_BUCKET environment variable is not set.")
