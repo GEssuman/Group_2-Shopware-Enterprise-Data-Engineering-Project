@@ -1,0 +1,50 @@
+{
+  "family": "",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/ecsTaskExecutionRole-lab6",
+  "taskRoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/ecsTaskRole",
+  "containerDefinitions": [
+    {
+      "name": "api-container",
+      "image": "${IMAGE_URI_VALIDATION}",
+      "essential": true,
+      "environment": [
+        {
+          "name": "API_URL",
+          "value": "${api_link}"
+        },
+        {
+          "name": "KINESIS_STREAM_NAME",
+          "value": "${kinesis_name}"
+        },
+        {
+          "name": "POLL_INTERVAL",
+          "value": "10"
+        },
+        {
+          "name": "AWS_REGION",
+          "value": "us-east-1"
+        },
+        {
+          "name": "rejected",
+          "value": "validation_output/result.json"
+        },
+        {
+          "name": "MASTER",
+          "value": "local[*]"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-region": "${AWS_REGION}",
+          "awslogs-group": "/ecs/ecommerce-lab6",
+          "awslogs-stream-prefix": "ecs"
+        }
+      }
+    }
+  ]
+}
