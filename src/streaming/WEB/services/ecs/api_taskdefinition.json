@@ -14,7 +14,7 @@
       "environment": [
         {
           "name": "API_URL",
-          "value": "http://4.328.189.26:8000/api/-traffic/"
+          "value": "http://3.248.199.26:8000/api/web-traffic/"
         },
         {
           "name": "KINESIS_STREAM_NAME",
