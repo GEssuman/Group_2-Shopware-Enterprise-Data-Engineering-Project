@@ -41,48 +41,16 @@ API_URL = os.getenv("API_URL")
 kinesis = boto3.client("kinesis")
 s3 = boto3.client("s3")
 
-# Expected schema
-EXPECTED_SCHEMA = {
-    "customer_id": int,
-    "interaction_type": str,
-    "timestamp": float,
-    "channel": str,
-    "rating": int,
-    "message_excerpt": str,
-}
+# Required fields only
 REQUIRED_FIELDS = ["customer_id", "interaction_type", "timestamp"]
-OPTIONAL_FIELDS = ["channel", "rating", "message_excerpt"]
 
 
 def validate_record(data):
-    """Validate a single record against the schema and non-null requirements."""
+    """Validate that required fields are present and non-null only."""
     try:
         for field in REQUIRED_FIELDS:
             if field not in data or data[field] is None:
                 return False, f"Missing or null field: {field}"
-        for field, expected_type in EXPECTED_SCHEMA.items():
-            if field in data and data[field] is not None:
-                if not isinstance(data[field], expected_type):
-                    return (
-                        False,
-                        f"Invalid type for {field}: expected {expected_type}, got {type(data[field])}",
-                    )
-        if data["customer_id"] <= 0:
-            return (
-                False,
-                f"Invalid customer_id: {data['customer_id']}, must be positive",
-            )
-        if data["timestamp"] < 0 or data["timestamp"] > 1767225600.0:
-            return (
-                False,
-                f"Invalid timestamp: {data['timestamp']}, must be between 0.0 and 1767225600.0",
-            )
-        if "rating" in data and data["rating"] is not None:
-            if not isinstance(data["rating"], int) or not (1 <= data["rating"] <= 5):
-                return (
-                    False,
-                    f"Invalid rating: {data['rating']}, must be between 1 and 5",
-                )
         return True, None
     except Exception as e:
         return False, f"Validation error: {str(e)}"
