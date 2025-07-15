@@ -71,3 +71,4 @@ jobs:
           --environment "Variables={PROJECT_BUCKET=${{ secrets.PROJECT_BUCKET }},LOGS_DATA_PREFIX=logs/}" \
           --region ${{ secrets.AWS_REGION }}
 
+#test
