@@ -42,10 +42,10 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build and push validation Docker image
+      - name: Build and push api Docker image
         run: |
           IMAGE_URI_API="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:api"
-          docker build -t $IMAGE_URI_API -f src/streaming/WEB/services/docker/dockerfile.dockerfile-api src/streaming/WEB/services/
+          docker build -t $IMAGE_URI_API -f src/streaming/WEB/services/docker/dockerfile-api src/streaming/WEB/services/
           docker push $IMAGE_URI_API
           echo "IMAGE_URI_API=$IMAGE_URI_API" > image_uris.txt
 
