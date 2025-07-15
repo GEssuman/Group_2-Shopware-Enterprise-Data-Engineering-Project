@@ -83,7 +83,7 @@ jobs:
           echo "IMAGE_URI_API=$IMAGE_URI_API" >> $GITHUB_ENV
 
       - name: Debug loaded image URIs
-        run: echo "API Image URI: $IMAGE_URI_API"
+        run: echo "API Image URI:$IMAGE_URI_API"
 
       - name: Replace image URI in validation task definition
         run: |
