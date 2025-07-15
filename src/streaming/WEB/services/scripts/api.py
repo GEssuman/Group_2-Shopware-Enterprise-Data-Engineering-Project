@@ -1,11 +1,8 @@
 import os
 import json
-import time
 import logging
-import requests
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
-from requests.exceptions import RequestException
 from datetime import datetime
 
 # Configuration from environment or defaults
