@@ -5,6 +5,7 @@ from pyspark.context import SparkContext
 from pyspark.sql import functions as F
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, FloatType, DoubleType
 from datetime import datetime
+from delta.tables import DeltaTable
 import json
 import boto3
 import logging
@@ -18,14 +19,15 @@ spark = glueContext.spark_session
 
 
 # Get job arguments
-args = getResolvedOptions(sys.argv, ['JOB_NAME', 'POS_S3_BUCKET'])
+args = getResolvedOptions(sys.argv, ['JOB_NAME', 'POS_S3_BUCKET', 'POS_DELTA_PATH'])
+delta_path = args['POS_DELTA_PATH']
 
 s3_input_path = f"s3://{args['POS_S3_BUCKET']}/POS/"
 
 schema = StructType([
     StructField("transaction_id", StringType()),
     StructField("store_id", IntegerType()),
-    StructField("production_id", IntegerType()),
+    StructField("product_id", IntegerType()),
     StructField("quantity", IntegerType()),
     StructField("revenue", FloatType()),
     StructField("discount_applied", FloatType()),
@@ -50,9 +52,14 @@ def read_csv_files(path):
 
 
 def main():
-  df = read_csv_files(s3_input_path)
-  df.withColumn("timestapm", )
+    df = read_csv_files(s3_input_path)
+    df = df.withColumn("timestamp", F.from_unixtime(F.col("timestamp")).cast("timestamp"))\
+            .withColumn("date", F.to_date("timestamp"))
 
+    df.write.format("delta") \
+            .partitionBy("date") \
+            .mode("append") \
+            .save(delta_path)
 
 if __name__ == "__main__":
     main()
