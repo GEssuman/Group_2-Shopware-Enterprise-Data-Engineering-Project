@@ -106,4 +106,4 @@ jobs:
             --service weblogs-api-service \
             --task-definition "$TASK_DEF_ARN" \
             --force-new-deployment \
-            --network-configuration "awsvpcConfiguration={subnets=[subnet-0a3d6890884fa19d2,subnet-0e77aaa29a6fe5946],securityGroups=[sg-08660a148decabcef],assignPublicIp=DISABLED}"
+            --network-configuration "awsvpcConfiguration={subnets=[subnet-0a3d6890884fa19d2,subnet-0e77aaa29a6fe5946],securityGroups=[sg-0d23674697d6a5c88],assignPublicIp=DISABLED}"
