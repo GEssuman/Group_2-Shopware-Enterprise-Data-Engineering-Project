@@ -7,73 +7,100 @@ import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 from requests.exceptions import RequestException
 from dotenv import load_dotenv
+from datetime import datetime
 
 # Load environment variables from .env file
 load_dotenv()
 
 # Configuration from environment or defaults
-API_URL = os.getenv("API_URL", "http://4.328.189.26:8000/api/-traffic/")
+API_URL = os.getenv("API_URL")
 KINESIS_STREAM_NAME = os.getenv("KINESIS_STREAM_NAME")
-REGION = os.getenv("AWS_REGION", "us-east-1")
-POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", 60))
+ERROR_S3_BUCKET = os.getenv("ERROR_S3_BUCKET")  # S3 bucket for error records
+FAILED_RECORDS_SNS_ARN = os.getenv("FAILED_RECORDS_SNS_ARN")  # SNS Topic ARN for notifications
+REGION = os.getenv("AWS_REGION")
+POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", 10))
 MAX_RETRIES = 5
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)  # Create a logger instance with the module name
 
-# Initialize Kinesis client
+
+# Initialize AWS clients
 kinesis = boto3.client("kinesis", region_name=REGION)
+s3 = boto3.client("s3", region_name=REGION)
+sns = boto3.client("sns", region_name=REGION)  # SNS client
 
-def fetch_traffic_data():
-    retries = 0
-    while retries < MAX_RETRIES:
-        try:
-            response = requests.get(API_URL, timeout=10)
-            response.raise_for_status()
-            return response.json()
-        except RequestException as e:
-            wait = 2 ** retries
-            logging.warning(f"API request failed (attempt {retries + 1}): {e}. Retrying in {wait} seconds...")
-            time.sleep(wait)
-            retries += 1
-    logging.error("Exceeded max retries for API request.")
-    return None
+# Define expected schema with types (use Python types for quick checks)
+EXPECTED_SCHEMA = {
+    "session_id": str,
+    "user_id": (int, type(None)),    
+    "page": str,
+    "device_type": (str, type(None)), 
+    "browser": (str, type(None)),     
+    "event_type": (str, type(None)), 
+    "timestamp": (float, int)         # Expect float or int epoch time
+}
 
-def send_to_kinesis(data):
-    try:
-        # Convert data to JSON string and encode as bytes
-        payload = json.dumps(data)
-        response = kinesis.put_record(
-            StreamName=KINESIS_STREAM_NAME,
-            Data=payload,
-            PartitionKey=data.get("session_id", "default-key")
-        )
-        logging.info(f"Sent record to Kinesis: ShardId={response['ShardId']}, SequenceNumber={response['SequenceNumber']}")
-    except (BotoCoreError, ClientError) as e:
-        logging.error(f"Failed to send data to Kinesis: {e}")
+def validate_record(record):
+    """
+    Validates a single record against EXPECTED_SCHEMA.
+    Returns: (bool) True if valid, False if not
+    """
+    for field, expected_type in EXPECTED_SCHEMA.items():
+        if field not in record:
+            logging.warning(f"Validation failed: Missing required field '{field}'.")
+            return False
+        value = record[field]
+        # Check nullable: if expected type is tuple including NoneType
+        if isinstance(expected_type, tuple):
+            if value is not None and not isinstance(value, expected_type):
+                logging.warning(f"Validation failed: Field '{field}' has incorrect type. Expected {expected_type}, got {type(value)}.")
+                return False
+        else:
+            if not isinstance(value, expected_type):
+                logging.warning(f"Validation failed: Field '{field}' has incorrect type. Expected {expected_type}, got {type(value)}.")
+                return False
+    return True
 
-def main_loop():
-    if not KINESIS_STREAM_NAME:
-        logging.error("KINESIS_STREAM_NAME environment variable is not set. Exiting.")
+def upload_to_s3(data):
+    """
+    Uploads invalid data JSON record to S3 for later analysis.
+    Creates a uniquely named object key using timestamp.
+    Also triggers SNS notification about the failure.
+    """
+    if not ERROR_S3_BUCKET:
+        logging.error("ERROR_S3_BUCKET environment variable is not set. Cannot upload invalid records.")
         return
 
-    logging.info(f"Starting data fetch loop. Poll interval: {POLL_INTERVAL} seconds.")
-    while True:
-        data = fetch_traffic_data()
-        if data:
-            logging.info("Fetched data:")
-            logging.info(json.dumps(data, indent=2))
+    try:
+        timestamp_str = datetime.utcnow().strftime("%Y-%m-%dT%H-%M-%S-%fZ")
+        key = f"failed_records/{timestamp_str}.json"
+        s3.put_object(
+            Bucket=ERROR_S3_BUCKET,
+            Key=key,
+            Body=json.dumps(data).encode('utf-8'),
+            ContentType="application/json"
+        )
+        logging.info(f"Uploaded invalid record to s3://{ERROR_S3_BUCKET}/{key}")
 
-            # Optional: append to local backup file
-            with open("traffic_data.json", "a") as f:
-                json.dump(data, f)
-                f.write("\n")
+        if FAILED_RECORDS_SNS_ARN:
+            message = {
+                "message": "Validation failure detected",
+                "s3_bucket": ERROR_S3_BUCKET,
+                "s3_key": key,
+                "record": data
+            }
+            sns.publish(
+                TopicArn=FAILED_RECORDS_SNS_ARN,
+                Message=json.dumps(message),
+                Subject="Validation Failed Record Notification"
+            )
+            logging.info(f"Published SNS notification to {FAILED_RECORDS_SNS_ARN}")
+        else:
+            logging.warning("FAILED_RECORDS_SNS_ARN environment variable not set. No SNS notification sent.")
 
-            # Send data to Kinesis
-            send_to_kinesis(data)
+    except (BotoCoreError, ClientError) as e:
+        logging.error(f"Failed to upload invalid record to S3 or publish SNS: {e}")
 
-        logging.info(f"Sleeping for {POLL_INTERVAL} seconds...\n")
-        time.sleep(POLL_INTERVAL)
 
-if __name__ == "__main__":
-    main_loop()
