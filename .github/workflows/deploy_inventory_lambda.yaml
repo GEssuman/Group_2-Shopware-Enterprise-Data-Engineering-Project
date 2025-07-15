@@ -5,7 +5,7 @@ on:
     branches: [ feature/batch-inventory ]
     paths:
       - '.github/workflows/deploy_inventory_lambda.yaml' 
-      - 'src/batch/inventory/services/lambda/**'
+      - 'src/batch/inventory/services/complete_lambda/lambda/**'
   workflow_dispatch:
 
 env:
@@ -35,14 +35,14 @@ jobs:
     # Package Lambda
     - name: Package Lambda
       run: |
-        cd src/batch/inventory/services/lambda
+        cd src/batch/inventory/services/complete_lambda/lambda
         pip install -r requirements.txt -t .
-        zip -r ../../lambda-deployment.zip .
+        zip -r ../lambda-deployment.zip .
 
     # Upload Lambda ZIP to S3
     - name: Upload Lambda ZIP to S3
       run: |
-        aws s3 cp lambda-deployment.zip s3://${{ secrets.PROJECT_BUCKET }}/scripts/lambda/lambda-deployment.zip
+        aws s3 cp src/batch/inventory/services/complete_lambda/lambda-deployment.zip s3://${{ secrets.PROJECT_BUCKET }}/scripts/lambda/lambda-deployment.zip
 
     # Wait for Lambda to be ready before update
     - name: Wait for Lambda to be ready before update
