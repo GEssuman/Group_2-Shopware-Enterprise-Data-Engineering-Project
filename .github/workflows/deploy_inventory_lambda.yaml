@@ -2,7 +2,7 @@ name: Deploy Lambda Functions
 
 on:
   push:
-    branches: [ main ]
+    branches: [ feature/batch-inventory ]
     paths:
       - '.github/workflows/deploy_inventory_lambda.yaml' 
       - 'src/batch/inventory/services/lambda/**'
