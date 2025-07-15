@@ -1,47 +1,48 @@
 {
-  "family": "",
+  "family": "weblogs-api-family",
   "networkMode": "awsvpc",
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "512",
   "memory": "1024",
-  "executionRoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/ecsTaskExecutionRole-lab6",
-  "taskRoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/ecsTaskRole",
+  "executionRoleArn": "arn:aws:iam::985539772768:role/lab6-ecs-task-execution-role",
+  "taskRoleArn": "arn:aws:iam::985539772768:role/ecsTaskExecutionRole-weblogs",
   "containerDefinitions": [
     {
       "name": "api-container",
-      "image": "${IMAGE_URI_VALIDATION}",
+      "image": "985539772768.dkr.ecr.us-east-1.amazonaws.com/weblogs/api-gtp",
       "essential": true,
       "environment": [
         {
           "name": "API_URL",
-          "value": "${api_link}"
+          "value": "${WEB_API_URL}"
         },
         {
           "name": "KINESIS_STREAM_NAME",
-          "value": "${kinesis_name}"
+          "value": "weblogs_stream"
         },
         {
           "name": "POLL_INTERVAL",
           "value": "10"
         },
         {
-          "name": "AWS_REGION",
+          "name": "REGION",
           "value": "us-east-1"
         },
-        {
-          "name": "rejected",
-          "value": "validation_output/result.json"
+          {
+          "name": "FAILED_RECORDS_SNS_ARN",
+          "value": "arn:aws:sns:us-east-1:985539772768:validation_fail_weblogs:3a6b908f-0dad-4c85-96ac-3f5e03f00a80"
         },
-        {
-          "name": "MASTER",
-          "value": "local[*]"
+          {
+          "name": "ERROR_S3_BUCKET",
+          "value": "weblogs-bucket-gtp"
         }
       ],
+
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
-          "awslogs-region": "${AWS_REGION}",
-          "awslogs-group": "/ecs/ecommerce-lab6",
+          "awslogs-region": "us-east-1",
+          "awslogs-group": "/ecs/api-task",
           "awslogs-stream-prefix": "ecs"
         }
       }
