@@ -22,7 +22,7 @@
         },
         {
           "name": "POLL_INTERVAL",
-          "value": "10"
+          "value": "6"
         },
         {
           "name": "REGION",
