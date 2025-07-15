@@ -85,7 +85,7 @@ jobs:
       - name: Debug loaded image URIs
         run: echo "API Image URI:$IMAGE_URI_API"
 
-      - name: Replace image URI in validation task definition
+      - name: Replace image URI in api task definition
         run: |
           sed "s|\${IMAGE_URI_API}|$IMAGE_URI_API|g" src/streaming/WEB/services/ecs/api_taskdefinition.json > temp-validation.json
           sed "s|<ACCOUNT_ID>|${{ secrets.AWS_ACCOUNT_ID }}|g" temp-validation.json > temp-validation-2.json
