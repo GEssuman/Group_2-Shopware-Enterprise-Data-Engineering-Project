@@ -24,12 +24,12 @@ s3_client = session.client('s3')
 
 # Configuration with validation
 STATE_MACHINE_ARN = os.environ.get('STATE_MACHINE_ARN')
-S3_BUCKET = os.environ.get('S3_BUCKET', 'misc-gtp-proj')
-LOG_FILE_PREFIX = os.environ.get('LOG_FILE_PREFIX', 'logs/lambda/logs')
-MAX_BATCH_SIZE = int(os.environ.get('MAX_BATCH_SIZE', '100'))
-MAX_RETRIES = int(os.environ.get('MAX_RETRIES', '3'))
-MAX_CHUNK_SIZE = int(os.environ.get('MAX_CHUNK_SIZE', str(50 * 1024)))  # 50KB per chunk default
-MAX_MESSAGES_PER_CHUNK = int(os.environ.get('MAX_MESSAGES_PER_CHUNK', '50'))  # Max messages per chunk
+S3_BUCKET = os.environ.get('PROJECT_BUCKET')
+LOG_FILE_PREFIX = os.environ.get('LOG_FILE_PREFIX')
+MAX_BATCH_SIZE = 100
+MAX_RETRIES = 3
+MAX_CHUNK_SIZE = 50 * 1024  # 50KB per chunk default
+MAX_MESSAGES_PER_CHUNK = 50  # Max messages per chunk
 
 # Validate required environment variables
 if not STATE_MACHINE_ARN:
