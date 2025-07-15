@@ -29,7 +29,6 @@ jobs:
       - name: Install AWS CLI
         run: |
           python -m pip install --upgrade pip
-          pip install awscli
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
@@ -92,5 +91,18 @@ jobs:
           sed "s|\${AWS_REGION}|${AWS_REGION}|g" temp-validation-2.json > rendered-task-def-api.json
 
       - name: Register ECS task definition - api
+        id: register-task-def
         run: |
-          aws ecs register-task-definition --cli-input-json file://rendered-task-def-api.json
+          aws ecs register-task-definition --cli-input-json file://rendered-task-def-api.json > taskdef-register-output.json
+          cat taskdef-register-output.json
+      
+      - name: Update ECS Service with new task definition
+        run: |
+          TASK_DEF_ARN=$(python3 -c "import json; print(json.load(open('taskdef-register-output.json'))['taskDefinition']['taskDefinitionArn'])")
+          echo "Updating ECS Service to use task definition: $TASK_DEF_ARN"
+          
+          aws ecs update-service \
+            --cluster weblogs-api \
+            --service weblogs-api-service \
+            --task-definition "$TASK_DEF_ARN" \
+            --force-new-deployment
