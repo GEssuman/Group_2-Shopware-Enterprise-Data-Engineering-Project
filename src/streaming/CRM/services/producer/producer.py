@@ -1,30 +1,45 @@
 import boto3
-import requests
 import json
-import time
-import random
 import logging
+import time
+import requests
+from botocore.exceptions import ClientError
+from dotenv import load_dotenv
+import os
+import random
 import uuid
 from datetime import datetime
-from botocore.exceptions import ClientError
-from requests.exceptions import RequestException, HTTPError, ConnectionError, Timeout
 
 # Set up logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
+
+# Load environment variables
+load_dotenv()
+
+# Configuration
+REQUIRED_ENV_VARS = ["STREAM_NAME", "BUCKET", "API_URL"]
+POLL_INTERVAL_SECONDS = 10
+MAX_RETRIES = 5
+BATCH_SIZE = 100
+
+# Validate environment variables
+missing_vars = [var for var in REQUIRED_ENV_VARS if os.getenv(var) is None]
+if missing_vars:
+    logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
+    raise ValueError(
+        f"Missing required environment variables: {', '.join(missing_vars)}"
+    )
+
+STREAM_NAME = os.getenv("STREAM_NAME")
+BUCKET = os.getenv("BUCKET")
+API_URL = os.getenv("API_URL")
 
 # AWS Clients
 kinesis = boto3.client("kinesis")
 s3 = boto3.client("s3")
-
-# Configuration
-API_ENDPOINT = "http://3.248.199.26:8000/api/customer-interaction/"
-STREAM_NAME = "ApiDataStream"
-BUCKET = "my-api-data-2025"
-MAX_RETRIES = 5
-TIMEOUT_SECONDS = 10
-MAX_BACKOFF_SECONDS = 30
-POLL_INTERVAL_SECONDS = 10
 
 # Expected schema
 EXPECTED_SCHEMA = {
@@ -36,22 +51,38 @@ EXPECTED_SCHEMA = {
     "message_excerpt": str,
 }
 REQUIRED_FIELDS = ["customer_id", "interaction_type", "timestamp"]
+OPTIONAL_FIELDS = ["channel", "rating", "message_excerpt"]
 
 
-def validate_record(record):
+def validate_record(data):
     """Validate a single record against the schema and non-null requirements."""
     try:
         for field in REQUIRED_FIELDS:
-            if field not in record or record[field] is None:
+            if field not in data or data[field] is None:
                 return False, f"Missing or null field: {field}"
-
         for field, expected_type in EXPECTED_SCHEMA.items():
-            if field in record and not isinstance(record[field], expected_type):
+            if field in data and data[field] is not None:
+                if not isinstance(data[field], expected_type):
+                    return (
+                        False,
+                        f"Invalid type for {field}: expected {expected_type}, got {type(data[field])}",
+                    )
+        if data["customer_id"] <= 0:
+            return (
+                False,
+                f"Invalid customer_id: {data['customer_id']}, must be positive",
+            )
+        if data["timestamp"] < 0 or data["timestamp"] > 1767225600.0:
+            return (
+                False,
+                f"Invalid timestamp: {data['timestamp']}, must be between 0.0 and 1767225600.0",
+            )
+        if "rating" in data and data["rating"] is not None:
+            if not isinstance(data["rating"], int) or not (1 <= data["rating"] <= 5):
                 return (
                     False,
-                    f"Invalid type for {field}: expected {expected_type}, got {type(record[field])}",
+                    f"Invalid rating: {data['rating']}, must be between 1 and 5",
                 )
-
         return True, None
     except Exception as e:
         return False, f"Validation error: {str(e)}"
@@ -59,136 +90,117 @@ def validate_record(record):
 
 def save_invalid_record(record, error):
     """Save invalid record to S3."""
-    try:
-        timestamp = datetime.utcnow()
-        s3_key = (
-            f"invalid/year={timestamp.year}/month={timestamp.month:02d}/"
-            f"day={timestamp.day:02d}/{timestamp.isoformat()}_{uuid.uuid4()}.json"
-        )
-        s3.put_object(
-            Bucket=BUCKET,
-            Key=s3_key,
-            Body=json.dumps(
-                {"error": error, "record": record, "timestamp": timestamp.isoformat()}
-            ),
-        )
-        logger.info(f"Saved invalid record to S3: {s3_key}")
-    except ClientError as e:
-        logger.error(f"Failed to save invalid record to S3: {str(e)}")
+    retries = 0
+    s3_key = f"invalid/year={datetime.utcnow().year}/month={datetime.utcnow().month:02d}/day={datetime.utcnow().day:02d}/{uuid.uuid4()}.json"
+    while retries < MAX_RETRIES:
+        try:
+            s3.put_object(
+                Bucket=BUCKET,
+                Key=s3_key,
+                Body=json.dumps(
+                    {
+                        "error": error,
+                        "record": record,
+                        "timestamp": datetime.utcnow().isoformat(),
+                    }
+                ),
+            )
+            logger.info(f"Saved invalid record to S3: {s3_key}")
+            return True
+        except ClientError as e:
+            retries += 1
+            if retries == MAX_RETRIES:
+                logger.error(
+                    f"Failed to save invalid record to S3 after {MAX_RETRIES} retries: {str(e)}"
+                )
+                return False
+            wait_time = min(2**retries + random.uniform(0, 0.5), 30)
+            logger.warning(f"S3 write failed, retrying in {wait_time:.2f} seconds...")
+            time.sleep(wait_time)
+    return False
 
 
 def poll_api():
+    """Poll the API and send valid records to Kinesis."""
     retries = 0
     while retries < MAX_RETRIES:
         try:
-            response = requests.get(API_ENDPOINT, timeout=TIMEOUT_SECONDS)
+            response = requests.get(API_URL)
             response.raise_for_status()
-
-            try:
-                record = response.json()
-            except json.JSONDecodeError as e:
-                logger.error(f"Invalid JSON response: {str(e)}")
-                save_invalid_record({}, str(e))
-                return False
-
-            if isinstance(record, dict):
-                records = [record]
-            elif isinstance(record, list):
-                records = record
-            else:
-                logger.error(f"Unexpected response format: {type(record)}")
-                save_invalid_record(
-                    record, f"Unexpected response format: {type(record)}"
-                )
-                return False
+            records = response.json()
+            logger.debug(f"Raw API response: {records}")
 
             kinesis_records = []
             for r in records:
                 is_valid, error = validate_record(r)
                 if is_valid:
-                    kinesis_records.append(
-                        {
-                            "Data": json.dumps(r),
-                            "PartitionKey": str(r.get("customer_id", "default")),
-                        }
-                    )
+                    try:
+                        record_data = json.dumps(r)
+                        logger.debug(f"Sending record to Kinesis: {record_data}")
+                        kinesis_records.append(
+                            {
+                                "Data": record_data,
+                                "PartitionKey": str(r.get("customer_id", "default")),
+                            }
+                        )
+                    except (TypeError, ValueError) as e:
+                        logger.error(f"Failed to encode record: {str(e)}, Record: {r}")
+                        save_invalid_record(r, f"Encoding error: {str(e)}")
                 else:
                     logger.warning(f"Invalid record: {error}, Record: {r}")
                     save_invalid_record(r, error)
 
             if kinesis_records:
-                try:
-                    kinesis_response = kinesis.put_records(
-                        StreamName=STREAM_NAME, Records=kinesis_records
-                    )
-                    failed_count = kinesis_response.get("FailedRecordCount", 0)
-                    if failed_count > 0:
-                        logger.error(
-                            f"Failed to send {failed_count} records to Kinesis: {kinesis_response}"
+                retries_kinesis = 0
+                while retries_kinesis < MAX_RETRIES:
+                    try:
+                        kinesis.put_records(
+                            StreamName=STREAM_NAME, Records=kinesis_records
                         )
-                        raise ClientError(
-                            {"Error": {"Code": "PutRecordsFailed"}}, "put_records"
+                        logger.info(
+                            f"Successfully sent {len(kinesis_records)} records to Kinesis"
                         )
-                    logger.info(
-                        f"Successfully sent {len(kinesis_records)} records to Kinesis"
-                    )
-                    return True
-                except ClientError as e:
-                    logger.error(f"Kinesis error: {str(e)}")
-                    retries += 1
-                    wait_time = min(
-                        2**retries + random.uniform(0, 0.5), MAX_BACKOFF_SECONDS
-                    )
-                    logger.info(f"Backing off for {wait_time:.2f} seconds...")
-                    time.sleep(wait_time)
+                        return True
+                    except ClientError as e:
+                        retries_kinesis += 1
+                        if retries_kinesis == MAX_RETRIES:
+                            logger.error(
+                                f"Failed to send records to Kinesis after {MAX_RETRIES} retries: {str(e)}"
+                            )
+                            return False
+                        wait_time = min(2**retries_kinesis + random.uniform(0, 0.5), 30)
+                        logger.warning(
+                            f"Kinesis write failed, retrying in {wait_time:.2f} seconds..."
+                        )
+                        time.sleep(wait_time)
             else:
                 logger.info("No valid records to send to Kinesis")
-                return True
+            return True
 
-        except Timeout:
-            logger.error("API request timed out")
+        except requests.RequestException as e:
             retries += 1
-            wait_time = min(2**retries + random.uniform(0, 0.5), MAX_BACKOFF_SECONDS)
-            logger.info(f"Backing off for {wait_time:.2f} seconds...")
-            time.sleep(wait_time)
-
-        except ConnectionError:
-            logger.error("Network connection error")
-            retries += 1
-            wait_time = min(2**retries + random.uniform(0, 0.5), MAX_BACKOFF_SECONDS)
-            logger.info(f"Backing off for {wait_time:.2f} seconds...")
-            time.sleep(wait_time)
-
-        except HTTPError as e:
-            status_code = e.response.status_code if e.response else "Unknown"
-            if status_code == 429:
-                wait_time = min(
-                    2**retries + random.uniform(0, 0.5), MAX_BACKOFF_SECONDS
+            if retries == MAX_RETRIES:
+                logger.error(
+                    f"Failed to fetch API after {MAX_RETRIES} retries: {str(e)}"
                 )
-                logger.warning(
-                    f"Rate limited (429). Backing off for {wait_time:.2f} seconds..."
-                )
-                time.sleep(wait_time)
-                retries += 1
-            else:
-                logger.error(f"HTTP error: {str(e)}, Status: {status_code}")
-                save_invalid_record({}, f"HTTP error: {str(e)}, Status: {status_code}")
                 return False
-
-    logger.error("Max retries exceeded for transient errors in poll attempt")
-    return False
+            wait_time = min(2**retries + random.uniform(0, 0.5), 30)
+            logger.warning(
+                f"API request failed, retrying in {wait_time:.2f} seconds..."
+            )
+            time.sleep(wait_time)
 
 
 def main():
     logger.info("Starting API polling loop")
     while True:
         try:
-            success = poll_api()
-            if not success:
-                logger.warning("Poll attempt failed, continuing to next poll")
+            if not poll_api():
+                logger.warning("API polling failed, retrying after delay")
+            time.sleep(POLL_INTERVAL_SECONDS)
         except Exception as e:
             logger.error(f"Fatal error in polling loop: {str(e)}")
-        time.sleep(POLL_INTERVAL_SECONDS)
+            time.sleep(POLL_INTERVAL_SECONDS)
 
 
 if __name__ == "__main__":
