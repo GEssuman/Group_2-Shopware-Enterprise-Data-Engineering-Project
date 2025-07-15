@@ -9,7 +9,7 @@
   "containerDefinitions": [
     {
       "name": "api-container",
-      "image": "985539772768.dkr.ecr.us-east-1.amazonaws.com/weblogs/api-gtp",
+      "image": "985539772768.dkr.ecr.us-east-1.amazonaws.com/weblogs/api-gtp:api",
       "essential": true,
       "environment": [
         {
