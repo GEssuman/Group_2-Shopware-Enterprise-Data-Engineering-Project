@@ -6,11 +6,7 @@ import requests
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 from requests.exceptions import RequestException
-from dotenv import load_dotenv
 from datetime import datetime
-
-# Load environment variables from .env file
-load_dotenv()
 
 # Configuration from environment or defaults
 API_URL = os.getenv("API_URL")
