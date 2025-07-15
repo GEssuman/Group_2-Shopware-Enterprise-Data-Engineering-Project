@@ -1,17 +1,9 @@
 FROM python:3.9-slim
 
-# Set environment variables you actually need (optional)
-ENV HOME=/root
-
-# Install any system packages needed (add if needed)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy and install Python dependencies
 COPY scripts/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
 
 # Set working directory
 WORKDIR /app
@@ -21,4 +13,3 @@ COPY scripts/api.py .
 
 # Default command
 CMD ["python", "api.py"]
-
