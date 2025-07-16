@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from botocore.exceptions import BotoCoreError, ClientError
 from io import StringIO
 from datetime import datetime
+import json
 # Load env variables from .env file
 load_dotenv()
 bucket_name = os.getenv("AWS_S3_BUCKET")
@@ -38,8 +39,9 @@ def list_files(bucket, prefix=""):
                 logger.warning(f"No files found in bucket '{bucket}' with prefix '{prefix}'")
                 return []
     except (BotoCoreError, ClientError) as e:
-        logger.error(f"Error listing files from S3: {e}")
-        return []
+        error_msg = f"Error listing files from S3: {e}"
+        logger.error(error_msg)
+        raise RuntimeError(error_msg)  # Let `main()` handle this
 
 def download_from_s3(s3_uri):
     """ Download a CSV file from S3 and load it into a Pandas DataFrame """
@@ -101,30 +103,58 @@ def quarantine_file(bucket, original_key ,reason):
         logger.error(f"Failed to quarantine file {original_key}: {e}")
 
 def main():
-    if not bucket_name:
-        logger.error("AWS_S3_BUCKET environment variable is not set.")
-        return
+
+    summary = {
+    "processed_files": 0,
+    "quarantined_files": [],
+    "errors": []
+    }
     
-    files = list_files(bucket_name, "POS")
+    if not bucket_name:
+        msg = "AWS_S3_BUCKET environment variable is not set."
+        logger.error(msg)
+        summary["errors"].append(msg)
+        return summary
+
+    
+    try:
+        files = list_files(bucket_name, "POS")
+    except Exception as e:
+        summary["errors"].append(str(e))
+        return summary
 
     if len(files) == 0:
-        logger.info(f"No files available in the bucket to validate")
-        return
+        logger.info("No files available in the bucket to validate")
+        return summary
     
     for file in files:
+        try:
+            df = download_from_s3(f"s3://{bucket_name}/{file}")
+            if df is None:
+                reason = "Failed to load file as DataFrame"
+                quarantine_file(bucket_name, file, reason)
+                summary["quarantined_files"].append({"file": file, "reason": reason})
+                continue
 
-        df = download_from_s3(f"s3://{bucket_name}/{file}")
-        if df is None:
-            quarantine_file(bucket_name, file, "Failed to load file as DataFrame")
-            continue
+            is_valid, reason = validate_file(df, file)
+            if not is_valid:
+                quarantine_file(bucket_name, file, reason)
+                summary["quarantined_files"].append({"file": file, "reason": reason})
+            else:
+                summary["processed_files"] += 1
+        except Exception as e:
+            error_msg = f"Unexpected error while processing {file}: {str(e)}"
+            logger.error(error_msg)
+            summary["errors"].append(error_msg)
 
-        is_valid, reason = validate_file(df, file)
-        if not is_valid:
-            quarantine_file(bucket_name, file, reason)
+
+    return summary
     
 
-    
 
+if __name__ == "__main__":
+    result = main()
 
-if "__main__" == __name__:
-    main()
+    # Log to Glue console
+    logger.info(f"Job Summary: {json.dumps(result)}")
+    print(json.dumps(result))
