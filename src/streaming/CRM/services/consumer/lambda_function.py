@@ -7,7 +7,6 @@ from botocore.exceptions import ClientError
 import boto3
 import random
 import os
-import time
 
 # Set up logging
 logging.basicConfig(
@@ -17,6 +16,8 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 REQUIRED_ENV_VARS = ["STREAM_NAME", "BUCKET", "DLQ_URL"]
+MIN_TIMESTAMP = 0.0
+MAX_TIMESTAMP = 1767225600.0
 MAX_RETRIES = 5
 BATCH_SIZE = 100
 
@@ -88,7 +89,10 @@ def clean_record(data):
             raise ValueError(
                 f"Invalid customer_id: {cleaned['customer_id']}, must be positive"
             )
-        # Removed timestamp range validation
+        if cleaned["timestamp"] < MIN_TIMESTAMP or cleaned["timestamp"] > MAX_TIMESTAMP:
+            raise ValueError(
+                f"Invalid timestamp: {cleaned['timestamp']}, must be between {MIN_TIMESTAMP} and {MAX_TIMESTAMP}"
+            )
         return cleaned, None
     except Exception as e:
         return None, f"Cleaning error: {str(e)}"

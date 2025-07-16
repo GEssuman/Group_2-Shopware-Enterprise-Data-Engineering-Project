@@ -1,4 +1,4 @@
-name: Deploy to Amazon ECS (Consumer)
+name: Deploy to AWS Lambda (Consumer)
 
 on:
   push:
@@ -11,18 +11,16 @@ on:
 env:
   AWS_REGION: ${{ secrets.AWS_REGION }}
   AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
-  CRM_CONSUMER_ECR_REPOSITORY: ${{ secrets.CRM_CONSUMER_ECR_REPOSITORY }}
-  CRM_CONSUMER_ECS_SERVICE: ${{ secrets.CRM_CONSUMER_ECS_SERVICE }}
-  CRM_CONSUMER_ECS_CLUSTER: ${{ secrets.CRM_CONSUMER_ECS_CLUSTER }}
-  CRM_CONSUMER_ECS_TASK_DEFINITION: ${{ secrets.CRM_CONSUMER_ECS_TASK_DEFINITION }}
-  CRM_CONSUMER_CONTAINER_NAME: ${{ secrets.CRM_CONSUMER_CONTAINER_NAME }}
+  LAMBDA_FUNCTION_NAME: ${{ secrets.CRM_LAMBDA_FUNCTION_NAME }}
+  S3_BUCKET: ${{ secrets.CRM_S3_BUCKET }}
+  LAMBDA_ROLE_ARN: ${{ secrets.CRM_LAMBDA_ROLE_ARN }}
 
 permissions:
   contents: read
 
 jobs:
   deploy:
-    name: Deploy Consumer to ECS
+    name: Deploy Consumer to Lambda
     runs-on: ubuntu-latest
 
     steps:
@@ -36,35 +34,46 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
 
-      - name: Build, Tag, and Push Image to Amazon ECR
-        id: build-image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
+      - name: Install Dependencies
         run: |
-          docker build -t $ECR_REGISTRY/$CRM_CONSUMER_ECR_REPOSITORY:latest ./src/streaming/CRM/services/consumer
-          docker push $ECR_REGISTRY/$CRM_CONSUMER_ECR_REPOSITORY:latest
-          echo "image=$ECR_REGISTRY/$CRM_CONSUMER_ECR_REPOSITORY:latest" >> $GITHUB_OUTPUT
+          mkdir -p src/streaming/CRM/services/consumer/package
+          pip install boto3==1.28.57 -t src/streaming/CRM/services/consumer/package/
+          cd src/streaming/CRM/services/consumer
+          cp lambda_function.py package/
+          cd package
+          zip -r ../lambda_function.zip .
 
-      - name: Fill in the New Image ID in the Amazon ECS Task Definition
-        id: task-def
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: ${{ env.CRM_CONSUMER_ECS_TASK_DEFINITION }}
-          container-name: ${{ env.CRM_CONSUMER_CONTAINER_NAME }}
-          image: ${{ steps.build-image.outputs.image }}
+      - name: Upload to S3
+        run: |
+          aws s3 cp src/streaming/CRM/services/consumer/lambda_function.zip s3://$S3_BUCKET/lambda_function.zip
+        env:
+          S3_BUCKET: ${{ env.S3_BUCKET }}
 
-      - name: Deploy Amazon ECS Task Definition
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: ${{ steps.task-def.outputs.task-definition }}
-          service: ${{ env.CRM_CONSUMER_ECS_SERVICE }}
-          cluster: ${{ env.CRM_CONSUMER_ECS_CLUSTER }}
-          wait-for-service-stability: true
+      - name: Update Lambda Function
+        run: |
+          aws lambda update-function-code \
+            --function-name $LAMBDA_FUNCTION_NAME \
+            --s3-bucket $S3_BUCKET \
+            --s3-key lambda_function.zip \
+            --region $AWS_REGION
+        env:
+          LAMBDA_FUNCTION_NAME: ${{ env.LAMBDA_FUNCTION_NAME }}
+          S3_BUCKET: ${{ env.S3_BUCKET }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+
+      - name: Wait for Lambda Update
+        run: |
+          aws lambda wait function-updated \
+            --function-name $LAMBDA_FUNCTION_NAME \
+            --region $AWS_REGION
+        env:
+          LAMBDA_FUNCTION_NAME: ${{ env.LAMBDA_FUNCTION_NAME }}
+          AWS_REGION: ${{ env.AWS_REGION }}
 
       - name: Notify on Failure
         if: failure()
