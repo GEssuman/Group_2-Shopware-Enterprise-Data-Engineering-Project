@@ -1,7 +1,7 @@
 import pytest
 import pandas as pd
 from unittest.mock import patch, MagicMock
-from io import StringIO
+from io import StringIO, BytesIO
 
 import batch.pos.services.validator.validate as validate_mode
 
@@ -37,3 +37,22 @@ def test_list_files_no_contents():
     with patch.object(validate_mode.s3, "list_objects_v2", return_value={}):
         files = validate_mode.list_files("test-bucket", "POS")
         assert files == []
+
+def test_download_from_s3_success(sample_df):
+    csv_data = sample_df.to_csv(index=False)
+    mock_s3 = MagicMock()
+    mock_s3.get_object.return_value = {
+        'Body': BytesIO(csv_data.encode("utf-8"))
+    }
+
+    with patch("batch.pos.services.validator.validate.boto3.client", return_value=mock_s3):
+        df = validate_mode.download_from_s3("s3://test-bucket/POS/test.csv")
+        pd.testing.assert_frame_equal(df, sample_df)
+
+def test_download_from_s3_failure():
+    mock_s3 = MagicMock()
+    mock_s3.get_object.side_effect = Exception("Download failed")
+
+    with patch("batch.pos.services.validator.validate.boto3.client", return_value=mock_s3):
+        df = validate_mode.download_from_s3("s3://test-bucket/POS/missing.csv")
+        assert df is None
