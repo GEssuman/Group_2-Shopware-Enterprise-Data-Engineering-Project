@@ -26,7 +26,11 @@ jobs:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ secrets.AWS_REGION }}
-        
+
+
+    - name: Debug - Check glue.py size before upload
+      run: |
+        ls -lh src/batch/inventory/services/glue_service/glue.py      
 
     - name: Upload Glue Script to S3
       run: |
@@ -37,6 +41,10 @@ jobs:
         PROJECT_BUCKET: ${{ secrets.PROJECT_BUCKET }} 
         # Use env variable for consistency and readability
 
+    - name: Debug - Check S3 object size after upload
+      run: |
+        aws s3 ls s3://${{ secrets.PROJECT_BUCKET }}/scripts/glue/glue.py
+        aws s3api head-object --bucket ${{ secrets.PROJECT_BUCKET }} --key scripts/glue/glue.py
 
     - name: Deploy Glue Python Shell Job
       run: |
