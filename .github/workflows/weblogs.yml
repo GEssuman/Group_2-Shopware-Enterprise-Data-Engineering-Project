@@ -35,8 +35,7 @@ jobs:
           python-version: '3.10'
 
       - name: Install AWS CLI
-        run: |
-          python -m pip install --upgrade pip
+        run: python -m pip install --upgrade pip
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
@@ -112,7 +111,6 @@ jobs:
         run: |
           TASK_DEF_ARN_API=$(python3 -c "import json; print(json.load(open('taskdef-register-output-api.json'))['taskDefinition']['taskDefinitionArn'])")
           echo "Updating ECS Service 'weblogs-api-service' to use task definition: $TASK_DEF_ARN_API"
-    
           aws ecs update-service \
             --cluster weblogs-api \
             --service weblogs-api-service \
@@ -140,13 +138,9 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install dependencies
-        run: |
-          pip install -r ${{ env.LAMBDA_SOURCE_PATH }}/requirements.txt -t ${{ env.LAMBDA_SOURCE_PATH }}
-
       - name: Zip Lambda function
         run: |
-          cd ${{ env.LAMBDA_SOURCE_PATH }}
+          cd $LAMBDA_SOURCE_PATH
           zip -r ../../lambda-package.zip .
 
       - name: Configure AWS credentials
@@ -159,22 +153,22 @@ jobs:
       - name: Check if Lambda function exists
         id: check_lambda
         run: |
-          aws lambda get-function --function-name ${{ env.LAMBDA_FUNCTION_NAME }} || echo "not-found" > function_status.txt
+          aws lambda get-function --function-name $LAMBDA_FUNCTION_NAME || echo "not-found" > function_status.txt
 
       - name: Create or update Lambda function
         run: |
           STATUS=$(cat function_status.txt)
           if [ "$STATUS" = "not-found" ]; then
-            echo "Creating Lambda function ${{ env.LAMBDA_FUNCTION_NAME }}"
+            echo "Creating Lambda function $LAMBDA_FUNCTION_NAME"
             aws lambda create-function \
-              --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
-              --runtime ${{ env.LAMBDA_RUNTIME }} \
-              --role ${{ env.LAMBDA_ROLE_ARN }} \
-              --handler ${{ env.LAMBDA_HANDLER }} \
+              --function-name $LAMBDA_FUNCTION_NAME \
+              --runtime $LAMBDA_RUNTIME \
+              --role $LAMBDA_ROLE_ARN \
+              --handler $LAMBDA_HANDLER \
               --zip-file fileb://lambda-package.zip \
               --timeout 60 \
               --memory-size 512
           else
-            echo "Updating Lambda function ${{ env.LAMBDA_FUNCTION_NAME }}"
-            aws lambda update-function-code --function-name ${{ env.LAMBDA_FUNCTION_NAME }} --zip-file fileb://lambda-package.zip
+            echo "Updating Lambda function $LAMBDA_FUNCTION_NAME"
+            aws lambda update-function-code --function-name $LAMBDA_FUNCTION_NAME --zip-file fileb://lambda-package.zip
           fi
