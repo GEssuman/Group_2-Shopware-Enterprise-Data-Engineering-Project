@@ -41,14 +41,18 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          pip install boto3==1.28.57 -t src/streaming/CRM/services/consumer/
+          mkdir -p src/streaming/CRM/services/consumer/package
+          pip install boto3==1.28.57 -t src/streaming/CRM/services/consumer/package/
           cd src/streaming/CRM/services/consumer
-          zip -r lambda_function.zip consumer.py boto3
+          cp lambda_function.py package/
+          cd package
+          zip -r ../lambda_function.zip .
 
       - name: Upload to S3
         run: |
-          export S3_BUCKET=${{ env.S3_BUCKET }}
           aws s3 cp src/streaming/CRM/services/consumer/lambda_function.zip s3://$S3_BUCKET/lambda_function.zip
+        env:
+          S3_BUCKET: ${{ env.S3_BUCKET }}
 
       - name: Update Lambda Function
         run: |
@@ -57,6 +61,19 @@ jobs:
             --s3-bucket $S3_BUCKET \
             --s3-key lambda_function.zip \
             --region $AWS_REGION
+        env:
+          LAMBDA_FUNCTION_NAME: ${{ env.LAMBDA_FUNCTION_NAME }}
+          S3_BUCKET: ${{ env.S3_BUCKET }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+
+      - name: Wait for Lambda Update
+        run: |
+          aws lambda wait function-updated \
+            --function-name $LAMBDA_FUNCTION_NAME \
+            --region $AWS_REGION
+        env:
+          LAMBDA_FUNCTION_NAME: ${{ env.LAMBDA_FUNCTION_NAME }}
+          AWS_REGION: ${{ env.AWS_REGION }}
 
       - name: Notify on Failure
         if: failure()
