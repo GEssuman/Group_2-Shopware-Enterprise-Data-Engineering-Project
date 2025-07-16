@@ -1,0 +1,64 @@
+name: Deploy to AWS Lambda (Consumer)
+
+on:
+  push:
+    paths:
+      - "src/streaming/CRM/services/consumer/**"
+      - ".github/workflows/deploy-consumer.yml"
+    branches:
+      - feature/crm
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+  LAMBDA_FUNCTION_NAME: ${{ secrets.LAMBDA_FUNCTION_NAME }}
+  S3_BUCKET: ${{ secrets.S3_BUCKET }}
+  LAMBDA_ROLE_ARN: ${{ secrets.LAMBDA_ROLE_ARN }}
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy Consumer to Lambda
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+
+      - name: Install Dependencies
+        run: |
+          pip install boto3==1.28.57 -t src/streaming/CRM/services/consumer/
+          cd src/streaming/CRM/services/consumer
+          zip -r lambda_function.zip consumer.py boto3
+
+      - name: Upload to S3
+        run: |
+          aws s3 cp src/streaming/CRM/services/consumer/lambda_function.zip s3://$S3_BUCKET/lambda_function.zip
+
+      - name: Update Lambda Function
+        run: |
+          aws lambda update-function-code \
+            --function-name $LAMBDA_FUNCTION_NAME \
+            --s3-bucket $S3_BUCKET \
+            --s3-key lambda_function.zip \
+            --region $AWS_REGION
+
+      - name: Notify on Failure
+        if: failure()
+        run: |
+          echo "Deployment failed. Check logs for details."
+          exit 1
