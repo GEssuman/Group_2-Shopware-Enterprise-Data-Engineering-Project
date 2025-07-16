@@ -143,7 +143,6 @@ def send_to_dlq(record_data, error_message, sequence_number):
 
 def lambda_handler(event, context):
     """Lambda handler for Kinesis stream events."""
-    logger.info(f"Received event: {json.dumps(event, indent=2)}")
     logger.info(f"Number of records received: {len(event.get('Records', []))}")
     logger.info("Processing Kinesis stream event")
     logger.handlers[0].flush()
