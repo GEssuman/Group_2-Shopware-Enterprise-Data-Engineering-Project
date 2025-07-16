@@ -11,9 +11,9 @@ on:
 env:
   AWS_REGION: ${{ secrets.AWS_REGION }}
   AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
-  LAMBDA_FUNCTION_NAME: ${{ secrets.LAMBDA_FUNCTION_NAME }}
-  S3_BUCKET: ${{ secrets.S3_BUCKET }}
-  LAMBDA_ROLE_ARN: ${{ secrets.LAMBDA_ROLE_ARN }}
+  LAMBDA_FUNCTION_NAME: ${{ secrets.CRM_LAMBDA_FUNCTION_NAME }}
+  S3_BUCKET: ${{ secrets.CRM_S3_BUCKET }}
+  LAMBDA_ROLE_ARN: ${{ secrets.CRM_LAMBDA_ROLE_ARN }}
 
 permissions:
   contents: read
@@ -47,7 +47,7 @@ jobs:
 
       - name: Upload to S3
         run: |
-          aws s3 cp src/streaming/CRM/services/consumer/lambda_function.zip s3://$S3_BUCKET/lambda_function.zip
+          aws s3 cp src/streaming/CRM/services/consumer/lambda_function.zip s3://$S3_BUCKETlambda_function.zip
 
       - name: Update Lambda Function
         run: |
