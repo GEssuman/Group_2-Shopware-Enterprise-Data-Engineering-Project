@@ -50,8 +50,9 @@ jobs:
 
       - name: Upload to S3
         run: |
-          export S3_BUCKET=${{ env.S3_BUCKET }}
           aws s3 cp src/streaming/CRM/services/consumer/lambda_function.zip s3://$S3_BUCKET/lambda_function.zip
+        env:
+          S3_BUCKET: ${{ env.S3_BUCKET }}
 
       - name: Update Lambda Function
         run: |
