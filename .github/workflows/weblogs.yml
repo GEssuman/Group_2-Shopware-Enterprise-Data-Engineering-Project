@@ -19,7 +19,7 @@ env:
   LAMBDA_RUNTIME: python3.10
   LAMBDA_HANDLER: lambda_function.lambda_handler
   LAMBDA_ROLE_ARN: arn:aws:iam::985539772768:role/service-role/weblogs-lambda-role-1awjd0og
-  LAMBDA_SOURCE_PATH: src/streaming/WEB/services/lambda/transformation
+  LAMBDA_SOURCE_PATH: src/streaming/WEB/services/lambda/
 
 jobs:
   build-and-push-ecr:
