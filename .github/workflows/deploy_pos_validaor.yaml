@@ -1,0 +1,54 @@
+name: Deploy Glue Job
+
+on:
+  push:
+    branches:
+      - feature/POS-batch
+    paths:
+      - glue_jobs/validate.py  # Adjust to your script path
+      - .github/workflows/deploy_pos_validaor.yaml
+
+jobs:
+  deploy-glue-job:
+    runs-on: ubuntu-latest
+
+    env:
+      SCRIPT_PATH: src/batch/pos/services/validator/validate.py
+      SCRIPT_S3_KEY: pos/validate.py
+      GLUE_SCRIPT_BUCKET: ${{ secrets.GLUE_SCRIPT_S3_PATH }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up AWS CLI
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Upload Glue script to S3
+        run: |
+          aws s3 cp $SCRIPT_PATH s3://${{ secrets.GLUE_SCRIPT_BUCKET }}/$SCRIPT_S3_KEY
+
+      - name: Update Glue Job Script Location
+        run: |
+          aws glue update-job \
+            --job-name POS-validator \
+            --job-update '{
+              "Role": "arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/AWSShopware-Validator-Role",
+              "Command": {
+                "Name": "pythonshell",
+                "ScriptLocation": "s3://${{ secrets.GLUE_SCRIPT_BUCKET }}/'"$SCRIPT_S3_KEY"'",
+                "PythonVersion": "3.12"
+              },
+              "DefaultArguments": {
+                "--AWS_RAW_S3_BUCKET": "${{ secrets.BATCH_SOURCE_BUCKET }}",
+                "--AWS_QUARANTINE_S3_BUCKET": "${{ secrets.BATCH_QUARANTINE_BUCKET }}",
+              },
+              "MaxCapacity": 1.0,
+              "ExecutionProperty": {
+                "MaxConcurrentRuns": 1
+              }
+            }'
