@@ -14,10 +14,9 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
 # Configuration
 REQUIRED_ENV_VARS = ["STREAM_NAME", "BUCKET", "DLQ_URL"]
-MIN_TIMESTAMP = 0.0
-MAX_TIMESTAMP = 1893456000.0
 MAX_RETRIES = 5
 BATCH_SIZE = 100
 
@@ -89,10 +88,7 @@ def clean_record(data):
             raise ValueError(
                 f"Invalid customer_id: {cleaned['customer_id']}, must be positive"
             )
-        if cleaned["timestamp"] < MIN_TIMESTAMP or cleaned["timestamp"] > MAX_TIMESTAMP:
-            raise ValueError(
-                f"Invalid timestamp: {cleaned['timestamp']}, must be between {MIN_TIMESTAMP} and {MAX_TIMESTAMP}"
-            )
+        # Removed timestamp range validation
         return cleaned, None
     except Exception as e:
         return None, f"Cleaning error: {str(e)}"
