@@ -32,7 +32,7 @@ jobs:
           echo "Uploading ${SCRIPT_PATH} to ${{ secrets.GLUE_SCRIPT_S3_PATH }}/$SCRIPT_S3_KEY"
           aws s3 cp "$SCRIPT_PATH" "${{ secrets.GLUE_SCRIPT_S3_PATH }}/$SCRIPT_S3_KEY"
 
-            - name: Create or Update Glue Job
+      - name: Create or Update Glue Job
         run: |
           JOB_NAME="POS-validator"
           SCRIPT_LOCATION="${{ secrets.GLUE_SCRIPT_S3_PATH }}/$SCRIPT_S3_KEY"
