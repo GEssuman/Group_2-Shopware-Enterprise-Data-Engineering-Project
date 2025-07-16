@@ -46,9 +46,9 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t $ECR_REGISTRY/$CRM_CONSUMER_ECR_REPOSITORY:$IMAGE_TAG ./src/streaming/CRM/services/consumer
-          docker push $ECR_REGISTRY/$CRM_CONSUMER_ECR_REPOSITORY:$IMAGE_TAG
-          echo "image=$ECR_REGISTRY/$CRM_CONSUMER_ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+          docker build -t $ECR_REGISTRY/$CRM_CONSUMER_ECR_REPOSITORY:latest ./src/streaming/CRM/services/consumer
+          docker push $ECR_REGISTRY/$CRM_CONSUMER_ECR_REPOSITORY:latest
+          echo "image=$ECR_REGISTRY/$CRM_CONSUMER_ECR_REPOSITORY:latest" >> $GITHUB_OUTPUT
 
       - name: Fill in the New Image ID in the Amazon ECS Task Definition
         id: task-def
