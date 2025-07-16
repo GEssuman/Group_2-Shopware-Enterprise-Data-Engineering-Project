@@ -35,7 +35,7 @@ jobs:
       - name: Create or Update Glue Job
         run: |
           JOB_NAME="POS-validator"
-          SCRIPT_LOCATION="${{ secrets.cd }}/$SCRIPT_S3_KEY"
+          SCRIPT_LOCATION="${{ secrets.GLUE_SCRIPT_S3_PATH }}/$SCRIPT_S3_KEY"
           ROLE_ARN="arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/AWSShopware-Validator-Role"
 
           echo "Checking if Glue job $JOB_NAME exists..."
