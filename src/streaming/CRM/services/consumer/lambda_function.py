@@ -7,12 +7,15 @@ from botocore.exceptions import ClientError
 import boto3
 import random
 import os
+import sys
+import time
 
 # Set up logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+handler = logging.StreamHandler(sys.stdout)
+handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+logger.addHandler(handler)
 
 # Configuration
 REQUIRED_ENV_VARS = ["STREAM_NAME", "BUCKET", "DLQ_URL"]
@@ -25,6 +28,7 @@ BATCH_SIZE = 100
 missing_vars = [var for var in REQUIRED_ENV_VARS if var not in os.environ]
 if missing_vars:
     logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
+    logger.handlers[0].flush()
     raise ValueError(
         f"Missing required environment variables: {', '.join(missing_vars)}"
     )
@@ -120,6 +124,7 @@ def send_to_dlq(record_data, error_message, sequence_number):
                 ),
             )
             logger.info(f"Sent record {sequence_number} to DLQ")
+            logger.handlers[0].flush()
             return True
         except ClientError as e:
             retries += 1
@@ -127,9 +132,11 @@ def send_to_dlq(record_data, error_message, sequence_number):
                 logger.error(
                     f"Failed to send record {sequence_number} to DLQ after {MAX_RETRIES} retries: {str(e)}"
                 )
+                logger.handlers[0].flush()
                 return False
             wait_time = min(2**retries + random.uniform(0, 0.5), 30)
             logger.warning(f"DLQ send failed, retrying in {wait_time:.2f} seconds...")
+            logger.handlers[0].flush()
             time.sleep(wait_time)
     return False
 
@@ -137,7 +144,9 @@ def send_to_dlq(record_data, error_message, sequence_number):
 def lambda_handler(event, context):
     """Lambda handler for Kinesis stream events."""
     logger.info(f"Received event: {json.dumps(event, indent=2)}")
+    logger.info(f"Number of records received: {len(event.get('Records', []))}")
     logger.info("Processing Kinesis stream event")
+    logger.handlers[0].flush()
     processed_count = 0
     failed_count = 0
 
@@ -147,6 +156,7 @@ def lambda_handler(event, context):
             logger.debug(
                 f"Raw record data for {sequence_number}: {record['kinesis']['data']}"
             )
+            logger.handlers[0].flush()
             try:
                 # Decode base64-encoded Kinesis data and parse JSON
                 data = json.loads(
@@ -154,6 +164,7 @@ def lambda_handler(event, context):
                 )
             except (json.JSONDecodeError, UnicodeDecodeError, TypeError) as e:
                 logger.error(f"Invalid data in record {sequence_number}: {str(e)}")
+                logger.handlers[0].flush()
                 send_to_dlq(
                     record["kinesis"]["data"],
                     f"Decode error: {str(e)}",
@@ -165,6 +176,7 @@ def lambda_handler(event, context):
             is_valid, error = validate_record(data)
             if not is_valid:
                 logger.error(f"Validation failed for record {sequence_number}: {error}")
+                logger.handlers[0].flush()
                 send_to_dlq(data, error, sequence_number)
                 failed_count += 1
                 continue
@@ -172,6 +184,7 @@ def lambda_handler(event, context):
             cleaned_data, error = clean_record(data)
             if error:
                 logger.error(f"Cleaning failed for record {sequence_number}: {error}")
+                logger.handlers[0].flush()
                 send_to_dlq(data, error, sequence_number)
                 failed_count += 1
                 continue
@@ -186,6 +199,7 @@ def lambda_handler(event, context):
                     )
                     processed_count += 1
                     logger.info(f"Processed record {sequence_number} to S3: {s3_key}")
+                    logger.handlers[0].flush()
                     break
                 except ClientError as e:
                     retries_s3 += 1
@@ -193,6 +207,7 @@ def lambda_handler(event, context):
                         logger.error(
                             f"Failed to write record {sequence_number} to S3 after {MAX_RETRIES} retries: {str(e)}"
                         )
+                        logger.handlers[0].flush()
                         send_to_dlq(
                             cleaned_data, f"S3 write error: {str(e)}", sequence_number
                         )
@@ -202,10 +217,12 @@ def lambda_handler(event, context):
                     logger.warning(
                         f"S3 write failed, retrying in {wait_time:.2f} seconds..."
                     )
+                    logger.handlers[0].flush()
                     time.sleep(wait_time)
 
         except Exception as e:
             logger.error(f"Unexpected error in record {sequence_number}: {str(e)}")
+            logger.handlers[0].flush()
             send_to_dlq(
                 record["kinesis"]["data"],
                 f"Unexpected error: {str(e)}",
@@ -216,6 +233,7 @@ def lambda_handler(event, context):
     logger.info(
         f"Processed {processed_count} records, failed {failed_count} records in batch"
     )
+    logger.handlers[0].flush()
     return {
         "statusCode": 200,
         "body": json.dumps(
