@@ -42,7 +42,7 @@ jobs:
     # Upload Lambda ZIP to S3
     - name: Upload Lambda ZIP to S3
       run: |
-        aws s3 cp src/batch/inventory/services/lambda_service-deployment.zip s3://${{ secrets.PROJECT_BUCKET }}/scripts/lambda/lambda-deployment.zip
+        aws s3 cp src/batch/inventory/services/lambda-deployment.zip s3://${{ secrets.PROJECT_BUCKET }}/scripts/lambda/lambda-deployment.zip
 
     # Wait for Lambda to be ready before update
     - name: Wait for Lambda to be ready before update
