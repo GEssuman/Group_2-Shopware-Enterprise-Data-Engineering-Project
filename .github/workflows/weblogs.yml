@@ -48,7 +48,6 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      # Build and push API Docker image
       - name: Build and push api Docker image
         run: |
           IMAGE_URI_API="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_API }}:api"
@@ -90,27 +89,25 @@ jobs:
           echo "IMAGE_URI_API=$IMAGE_URI_API" >> $GITHUB_ENV
 
       - name: Debug loaded image URIs
-        run: echo "API Image URI:$IMAGE_URI_API"
+        run: echo "API Image URI: $IMAGE_URI_API"
 
-      # Replace image URI and other placeholders in API task definition file
       - name: Replace image URI in api task definition
         run: |
           sed "s|\${IMAGE_URI_API}|$IMAGE_URI_API|g" src/streaming/WEB/services/ecs/api_taskdefinition.json > temp-api.json
           sed "s|<ACCOUNT_ID>|${{ secrets.AWS_ACCOUNT_ID }}|g" temp-api.json > temp-api-2.json
           sed "s|\${AWS_REGION}|${AWS_REGION}|g" temp-api-2.json > rendered-task-def-api.json
 
-      # Register API ECS task definition
       - name: Register ECS task definition - api
         id: register-task-def-api
         run: |
           aws ecs register-task-definition --cli-input-json file://rendered-task-def-api.json > taskdef-register-output-api.json
           cat taskdef-register-output-api.json
 
-      # Update API ECS Service with new task definition
       - name: Update ECS Service - api
         run: |
           TASK_DEF_ARN_API=$(python3 -c "import json; print(json.load(open('taskdef-register-output-api.json'))['taskDefinition']['taskDefinitionArn'])")
           echo "Updating ECS Service 'weblogs-api-service' to use task definition: $TASK_DEF_ARN_API"
+
           aws ecs update-service \
             --cluster weblogs-api \
             --service weblogs-api-service \
@@ -123,11 +120,6 @@ jobs:
     needs: build-and-push-ecr
     env:
       AWS_REGION: ${{ secrets.AWS_REGION }}
-      LAMBDA_FUNCTION_NAME: ${{ env.LAMBDA_FUNCTION_NAME }}
-      LAMBDA_RUNTIME: ${{ env.LAMBDA_RUNTIME }}
-      LAMBDA_HANDLER: ${{ env.LAMBDA_HANDLER }}
-      LAMBDA_ROLE_ARN: ${{ env.LAMBDA_ROLE_ARN }}
-      LAMBDA_SOURCE_PATH: ${{ env.LAMBDA_SOURCE_PATH }}
 
     steps:
       - name: Checkout code
