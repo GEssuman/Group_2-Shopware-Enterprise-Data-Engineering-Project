@@ -1,0 +1,81 @@
+name: Deploy Glue Jobs
+
+on:
+  push:
+    branches:
+      - feature/batch-inventory
+    paths:
+      - '.github/workflows/deploy_inventory_glue.yaml'
+      - 'src/batch/inventory/services/glue_service/**'   # Adjust path to your Glue scripts folder
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+
+jobs:
+  deploy-glue-jobs:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
+        
+
+    - name: Upload Glue Script to S3
+      run: |
+        echo "Uploading src/batch/inventory/services/glue_service/glue.py to ${{ secrets.GLUE_SCRIPT_S3_PATH }}"
+        aws s3 cp src/batch/inventory/services/glue_service/glue.py ${{ secrets.GLUE_SCRIPT_S3_PATH }}
+      env:
+        # Use env variable for consistency and readability
+        PROJECT_BUCKET: ${{ secrets.PROJECT_BUCKET }} 
+        # Use env variable for consistency and readability
+
+
+    - name: Deploy Glue Python Shell Job
+      run: |
+        JOB_NAME="inventory_validator"  # Your Glue job name
+        SCRIPT_LOCATION="s3://${{ secrets.PROJECT_BUCKET }}/scripts/glue/glue.py"
+        ROLE_ARN="arn:aws:iam::985539772768:role/inventory_glue_role"
+
+        # Check if job exists
+        if aws glue get-job --job-name $JOB_NAME --region ${{ secrets.AWS_REGION }}; then
+          echo "Updating existing Glue job $JOB_NAME"
+          aws glue update-job --job-name $JOB_NAME --job-update '{
+            "Role": "'"$ROLE_ARN"'",
+            "Command": {
+              "Name": "pythonshell",
+              "ScriptLocation": "'"$SCRIPT_LOCATION"'",
+              "PythonVersion": "3.9"
+            },
+            "DefaultArguments": {
+              "--job-language": "python",
+              "--enable-continuous-cloudwatch-log": "true",
+              "--enable-glue-datacatalog": "true"
+            },
+            "MaxRetries": 1,
+            "GlueVersion": "3.0",
+            "MaxCapacity": 0.0625,
+            "Timeout": 2880,
+            "Description": "Python Shell Glue job for lab6"
+          }' --region ${{ secrets.AWS_REGION }}
+        else
+          echo "Creating Glue job $JOB_NAME"
+          aws glue create-job \
+            --name $JOB_NAME \
+            --role $ROLE_ARN \
+            --command Name=pythonshell,ScriptLocation=$SCRIPT_LOCATION,PythonVersion=3.9 \
+            --default-arguments '{"--job-language":"python","--enable-continuous-cloudwatch-log":"true","--enable-glue-datacatalog":"true"}' \
+            --max-retries 1 \
+            --glue-version 3.0 \
+            --max-capacity 0.0625 \
+            --timeout 2880 \
+            --description "Python Shell Glue job for lab6" \
+            --region ${{ secrets.AWS_REGION }}
+        fi
