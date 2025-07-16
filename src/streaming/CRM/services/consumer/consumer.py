@@ -1,46 +1,39 @@
-import boto3
 import json
 import base64
 import logging
-import time
 import uuid
 from datetime import datetime
 from botocore.exceptions import ClientError
-from dotenv import load_dotenv
-import os
+import boto3
 import random
+import os
+import time
 
 # Set up logging
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
-
-# Load environment variables (optional, for local testing)
-load_dotenv()
-
 # Configuration
 REQUIRED_ENV_VARS = ["STREAM_NAME", "BUCKET", "DLQ_URL"]
-POLL_INTERVAL_SECONDS = 10
 MIN_TIMESTAMP = 0.0
-MAX_TIMESTAMP = 1767225600.0
+MAX_TIMESTAMP = 1893456000.0
 MAX_RETRIES = 5
 BATCH_SIZE = 100
 
 # Validate environment variables
-missing_vars = [var for var in REQUIRED_ENV_VARS if os.getenv(var) is None]
+missing_vars = [var for var in REQUIRED_ENV_VARS if var not in os.environ]
 if missing_vars:
     logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
     raise ValueError(
         f"Missing required environment variables: {', '.join(missing_vars)}"
     )
 
-STREAM_NAME = os.getenv("STREAM_NAME")
-BUCKET = os.getenv("BUCKET")
-DLQ_URL = os.getenv("DLQ_URL")
+STREAM_NAME = os.environ["STREAM_NAME"]
+BUCKET = os.environ["BUCKET"]
+DLQ_URL = os.environ["DLQ_URL"]
 
 # AWS Clients
-kinesis = boto3.client("kinesis")
 s3 = boto3.client("s3")
 sqs = boto3.client("sqs")
 
@@ -141,160 +134,90 @@ def send_to_dlq(record_data, error_message, sequence_number):
     return False
 
 
-def process_records():
-    """Poll Kinesis stream and process records with retries."""
-    retries = 0
-    while retries < MAX_RETRIES:
+def lambda_handler(event, context):
+    """Lambda handler for Kinesis stream events."""
+    logger.info("Processing Kinesis stream event")
+    processed_count = 0
+    failed_count = 0
+
+    for record in event["Records"]:
+        sequence_number = record["kinesis"]["sequenceNumber"]
         try:
-            response = kinesis.describe_stream(StreamName=STREAM_NAME)
-            shard_id = response["StreamDescription"]["Shards"][0]["ShardId"]
-            iterator_response = kinesis.get_shard_iterator(
-                StreamName=STREAM_NAME,
-                ShardId=shard_id,
-                ShardIteratorType="TRIM_HORIZON",
+            logger.debug(
+                f"Raw record data for {sequence_number}: {record['kinesis']['data']}"
             )
-            shard_iterator = iterator_response["ShardIterator"]
-            break
-        except ClientError as e:
-            retries += 1
-            if retries == MAX_RETRIES:
-                logger.error(
-                    f"Failed to initialize Kinesis shard iterator after {MAX_RETRIES} retries: {str(e)}"
+            try:
+                # Decode base64-encoded Kinesis data and parse JSON
+                data = json.loads(
+                    base64.b64decode(record["kinesis"]["data"]).decode("utf-8")
                 )
-                return False
-            wait_time = min(2**retries + random.uniform(0, 0.5), 30)
-            logger.warning(
-                f"Kinesis initialization failed, retrying in {wait_time:.2f} seconds..."
-            )
-            time.sleep(wait_time)
+            except (json.JSONDecodeError, UnicodeDecodeError, TypeError) as e:
+                logger.error(f"Invalid data in record {sequence_number}: {str(e)}")
+                send_to_dlq(
+                    record["kinesis"]["data"],
+                    f"Decode error: {str(e)}",
+                    sequence_number,
+                )
+                failed_count += 1
+                continue
 
-    while True:
-        try:
-            response = kinesis.get_records(
-                ShardIterator=shard_iterator, Limit=BATCH_SIZE
-            )
-            shard_iterator = response["NextShardIterator"]
-            records = response["Records"]
+            is_valid, error = validate_record(data)
+            if not is_valid:
+                logger.error(f"Validation failed for record {sequence_number}: {error}")
+                send_to_dlq(data, error, sequence_number)
+                failed_count += 1
+                continue
 
-            processed_count = 0
-            failed_count = 0
+            cleaned_data, error = clean_record(data)
+            if error:
+                logger.error(f"Cleaning failed for record {sequence_number}: {error}")
+                send_to_dlq(data, error, sequence_number)
+                failed_count += 1
+                continue
 
-            for record in records:
-                sequence_number = record["SequenceNumber"]
+            cleaned_data["ingestion_time"] = datetime.utcnow().isoformat()
+            s3_key = f"year={datetime.utcnow().year}/month={datetime.utcnow().month:02d}/day={datetime.utcnow().day:02d}/{sequence_number}.json"
+            retries_s3 = 0
+            while retries_s3 < MAX_RETRIES:
                 try:
-                    logger.debug(
-                        f"Raw record data for {sequence_number}: {record['Data']}"
+                    s3.put_object(
+                        Bucket=BUCKET, Key=s3_key, Body=json.dumps(cleaned_data)
                     )
-                    try:
-                        data = json.loads(
-                            base64.b64decode(record["Data"]).decode("utf-8")
-                        )
-                    except (
-                        json.JSONDecodeError,
-                        UnicodeDecodeError,
-                        base64.binascii.Error,
-                    ) as e:
+                    processed_count += 1
+                    logger.info(f"Processed record {sequence_number} to S3: {s3_key}")
+                    break
+                except ClientError as e:
+                    retries_s3 += 1
+                    if retries_s3 == MAX_RETRIES:
                         logger.error(
-                            f"Invalid data in record {sequence_number}: {str(e)}"
+                            f"Failed to write record {sequence_number} to S3 after {MAX_RETRIES} retries: {str(e)}"
                         )
                         send_to_dlq(
-                            record["Data"], f"Decode error: {str(e)}", sequence_number
+                            cleaned_data, f"S3 write error: {str(e)}", sequence_number
                         )
                         failed_count += 1
-                        continue
-
-                    is_valid, error = validate_record(data)
-                    if not is_valid:
-                        logger.error(
-                            f"Validation failed for record {sequence_number}: {error}"
-                        )
-                        send_to_dlq(data, error, sequence_number)
-                        failed_count += 1
-                        continue
-
-                    cleaned_data, error = clean_record(data)
-                    if error:
-                        logger.error(
-                            f"Cleaning failed for record {sequence_number}: {error}"
-                        )
-                        send_to_dlq(data, error, sequence_number)
-                        failed_count += 1
-                        continue
-
-                    cleaned_data["ingestion_time"] = datetime.utcnow().isoformat()
-                    s3_key = f"year={datetime.utcnow().year}/month={datetime.utcnow().month:02d}/day={datetime.utcnow().day:02d}/{sequence_number}.json"
-                    retries_s3 = 0
-                    while retries_s3 < MAX_RETRIES:
-                        try:
-                            s3.put_object(
-                                Bucket=BUCKET, Key=s3_key, Body=json.dumps(cleaned_data)
-                            )
-                            processed_count += 1
-                            logger.info(
-                                f"Processed record {sequence_number} to S3: {s3_key}"
-                            )
-                            break
-                        except ClientError as e:
-                            retries_s3 += 1
-                            if retries_s3 == MAX_RETRIES:
-                                logger.error(
-                                    f"Failed to write record {sequence_number} to S3 after {MAX_RETRIES} retries: {str(e)}"
-                                )
-                                send_to_dlq(
-                                    cleaned_data,
-                                    f"S3 write error: {str(e)}",
-                                    sequence_number,
-                                )
-                                failed_count += 1
-                                break
-                            wait_time = min(2**retries_s3 + random.uniform(0, 0.5), 30)
-                            logger.warning(
-                                f"S3 write failed, retrying in {wait_time:.2f} seconds..."
-                            )
-                            time.sleep(wait_time)
-
-                except Exception as e:
-                    logger.error(
-                        f"Unexpected error in record {sequence_number}: {str(e)}"
+                        break
+                    wait_time = min(2**retries_s3 + random.uniform(0, 0.5), 30)
+                    logger.warning(
+                        f"S3 write failed, retrying in {wait_time:.2f} seconds..."
                     )
-                    send_to_dlq(
-                        record["Data"], f"Unexpected error: {str(e)}", sequence_number
-                    )
-                    failed_count += 1
-
-            logger.info(
-                f"Processed {processed_count} records, failed {failed_count} records in batch"
-            )
-            time.sleep(POLL_INTERVAL_SECONDS)
-
-        except ClientError as e:
-            logger.error(f"Kinesis polling error: {str(e)}")
-            retries += 1
-            if retries == MAX_RETRIES:
-                logger.error(f"Max retries exceeded for Kinesis polling: {str(e)}")
-                return False
-            wait_time = min(2**retries + random.uniform(0, 0.5), 30)
-            logger.warning(
-                f"Kinesis polling failed, retrying in {wait_time:.2f} seconds..."
-            )
-            time.sleep(wait_time)
+                    time.sleep(wait_time)
 
         except Exception as e:
-            logger.error(f"Unexpected error in polling loop: {str(e)}")
-            time.sleep(POLL_INTERVAL_SECONDS)
+            logger.error(f"Unexpected error in record {sequence_number}: {str(e)}")
+            send_to_dlq(
+                record["kinesis"]["data"],
+                f"Unexpected error: {str(e)}",
+                sequence_number,
+            )
+            failed_count += 1
 
-
-def main():
-    logger.info("Starting Kinesis consumer loop")
-    while True:
-        try:
-            if not process_records():
-                logger.warning("Process records failed, retrying after delay")
-            time.sleep(POLL_INTERVAL_SECONDS)
-        except Exception as e:
-            logger.error(f"Fatal error in consumer loop: {str(e)}")
-            time.sleep(POLL_INTERVAL_SECONDS)
-
-
-if __name__ == "__main__":
-    main()
+    logger.info(
+        f"Processed {processed_count} records, failed {failed_count} records in batch"
+    )
+    return {
+        "statusCode": 200,
+        "body": json.dumps(
+            {"processed_count": processed_count, "failed_count": failed_count}
+        ),
+    }
