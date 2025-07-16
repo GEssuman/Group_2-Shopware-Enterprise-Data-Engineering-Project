@@ -1,37 +1,3 @@
-name: Deploy Glue Job
-
-on:
-  push:
-    branches:
-      - feature/POS-batch
-    paths:
-      - glue_jobs/validate.py
-      - .github/workflows/deploy_pos_validator.yaml
-
-jobs:
-  deploy-glue-job:
-    runs-on: ubuntu-latest
-
-    env:
-      SCRIPT_PATH: src/batch/pos/services/validator/validate.py
-      SCRIPT_S3_KEY: pos/validate.py
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Set up AWS CLI
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Upload Glue script to S3
-        run: |
-          echo "Uploading ${SCRIPT_PATH} to ${{ secrets.GLUE_SCRIPT_S3_PATH }}/$SCRIPT_S3_KEY"
-          aws s3 cp "$SCRIPT_PATH" "${{ secrets.GLUE_SCRIPT_S3_PATH }}/$SCRIPT_S3_KEY"
-
       - name: Create or Update Glue Job
         run: |
           JOB_NAME="POS-validator"
@@ -52,7 +18,8 @@ jobs:
                   Role: $role,
                   Command: {
                     Name: "pythonshell",
-                    ScriptLocation: $script
+                    ScriptLocation: $script,
+                    PythonVersion: "3"
                   },
                   DefaultArguments: {
                     "--AWS_RAW_S3_BUCKET": $raw,
@@ -68,7 +35,7 @@ jobs:
             aws glue create-job \
               --name "$JOB_NAME" \
               --role "$ROLE_ARN" \
-              --command Name=pythonshell,ScriptLocation="$SCRIPT_LOCATION" \
+              --command Name=pythonshell,ScriptLocation="$SCRIPT_LOCATION",PythonVersion=3 \
               --default-arguments '{
                 "--AWS_RAW_S3_BUCKET": "${{ secrets.BATCH_SOURCE_BUCKET }}",
                 "--AWS_QUARANTINE_S3_BUCKET": "${{ secrets.BATCH_QUARANTINE_BUCKET }}"
