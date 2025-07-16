@@ -91,7 +91,7 @@ jobs:
           echo "IMAGE_URI_API=$IMAGE_URI_API" >> $GITHUB_ENV
 
       - name: Debug loaded image URIs
-        run: echo "API Image URI: $IMAGE_URI_API"
+        run: echo "API Image URI:$IMAGE_URI_API"
 
       # Replace image URI and other placeholders in API task definition file
       - name: Replace image URI in api task definition
