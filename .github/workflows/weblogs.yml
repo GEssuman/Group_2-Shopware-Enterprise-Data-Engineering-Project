@@ -6,7 +6,7 @@ on:
       - 'src/streaming/WEB/services/scripts/**'
       - 'src/streaming/WEB/services/docker/**'
       - 'src/streaming/WEB/services/ecs/**'
-      - 'src/streaming/WEB/services/lambda/validation_lambda/**'
+      - 'src/streaming/WEB/services/lambda/**'
       - '.github/workflows/weblogs.yml'
     branches:
       - feature/weblogs
@@ -142,16 +142,13 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Check if Lambda function exists
-        id: check_lambda
-        run: |
-          aws lambda get-function --function-name $LAMBDA_FUNCTION_NAME || echo "not-found" > function_status.txt
-
       - name: Create or update Lambda function
         run: |
-          STATUS=$(cat function_status.txt)
-          if [ "$STATUS" = "not-found" ]; then
-            echo "Creating Lambda function $LAMBDA_FUNCTION_NAME"
+          if aws lambda get-function --function-name $LAMBDA_FUNCTION_NAME > /dev/null 2>&1; then
+            echo "Lambda function exists, updating code..."
+            aws lambda update-function-code --function-name $LAMBDA_FUNCTION_NAME --zip-file fileb://lambda-package.zip
+          else
+            echo "Lambda function not found, creating..."
             aws lambda create-function \
               --function-name $LAMBDA_FUNCTION_NAME \
               --runtime $LAMBDA_RUNTIME \
@@ -160,7 +157,4 @@ jobs:
               --zip-file fileb://lambda-package.zip \
               --timeout 60 \
               --memory-size 512
-          else
-            echo "Updating Lambda function $LAMBDA_FUNCTION_NAME"
-            aws lambda update-function-code --function-name $LAMBDA_FUNCTION_NAME --zip-file fileb://lambda-package.zip
           fi
