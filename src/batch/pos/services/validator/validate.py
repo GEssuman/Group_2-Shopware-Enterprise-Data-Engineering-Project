@@ -10,8 +10,6 @@ import sys
 # Load env variables from .env file
 
 
-raw_bucket_name = os.environ.get("AWS_RAW_S3_BUCKET") or sys.argv[sys.argv.index('--AWS_RAW_S3_BUCKET') + 1]
-quarantine_bucket_name = os.environ.get("AWS_QUARANTINE_S3_BUCKET") or sys.argv[sys.argv.index('--AWS_QUARANTINE_S3_BUCKET') + 1]
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s]: %(message)s")
 logger = logging.getLogger()
@@ -104,6 +102,9 @@ def quarantine_file(bucket, original_key ,reason):
         logger.error(f"Failed to quarantine file {original_key}: {e}")
 
 def main():
+    raw_bucket_name = os.environ.get("AWS_RAW_S3_BUCKET") or sys.argv[sys.argv.index('--AWS_RAW_S3_BUCKET') + 1]
+    quarantine_bucket_name = os.environ.get("AWS_QUARANTINE_S3_BUCKET") or sys.argv[sys.argv.index('--AWS_QUARANTINE_S3_BUCKET') + 1]
+
 
     summary = {
     "processed_files": 0,

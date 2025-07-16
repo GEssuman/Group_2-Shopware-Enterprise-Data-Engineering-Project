@@ -6,7 +6,7 @@ on:
       - feature/POS-batch
     paths:
       - glue_jobs/validate.py
-      - .github/workflows/deploy_pos_validaor.yaml
+      - .github/workflows/deploy_pos_validator.yaml
 
 jobs:
   deploy-glue-job:
@@ -29,13 +29,13 @@ jobs:
 
       - name: Upload Glue script to S3
         run: |
-          echo "Uploading $SCRIPT_PATH to s3://${{ secrets.GLUE_SCRIPT_S3_PATH }}/$SCRIPT_S3_KEY"
-          aws s3 cp "$SCRIPT_PATH" "s3://${{ secrets.GLUE_SCRIPT_S3_PATH }}/$SCRIPT_S3_KEY"
+          echo "Uploading ${SCRIPT_PATH} to ${{ secrets.GLUE_SCRIPT_S3_PATH }}/$SCRIPT_S3_KEY"
+          aws s3 cp "$SCRIPT_PATH" "${{ secrets.GLUE_SCRIPT_S3_PATH }}/$SCRIPT_S3_KEY"
 
       - name: Create or Update Glue Job
         run: |
           JOB_NAME="POS-validator"
-          SCRIPT_LOCATION="s3://${{ secrets.GLUE_SCRIPT_S3_PATH }}/$SCRIPT_S3_KEY"
+          SCRIPT_LOCATION="${{ secrets.cd }}/$SCRIPT_S3_KEY"
           ROLE_ARN="arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/AWSShopware-Validator-Role"
 
           echo "Checking if Glue job $JOB_NAME exists..."
