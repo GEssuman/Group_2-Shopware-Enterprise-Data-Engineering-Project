@@ -136,6 +136,7 @@ def send_to_dlq(record_data, error_message, sequence_number):
 
 def lambda_handler(event, context):
     """Lambda handler for Kinesis stream events."""
+    logger.info(f"Received event: {json.dumps(event, indent=2)}")
     logger.info("Processing Kinesis stream event")
     processed_count = 0
     failed_count = 0
@@ -176,7 +177,7 @@ def lambda_handler(event, context):
                 continue
 
             cleaned_data["ingestion_time"] = datetime.utcnow().isoformat()
-            s3_key = f"year={datetime.utcnow().year}/month={datetime.utcnow().month:02d}/day={datetime.utcnow().day:02d}/{sequence_number}.json"
+            s3_key = f"processed/year={datetime.utcnow().year}/month={datetime.utcnow().month:02d}/day={datetime.utcnow().day:02d}/{sequence_number}.json"
             retries_s3 = 0
             while retries_s3 < MAX_RETRIES:
                 try:
