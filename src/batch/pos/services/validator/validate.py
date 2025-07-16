@@ -2,15 +2,16 @@ import pandas as pd
 import os
 import boto3
 import logging
-from dotenv import load_dotenv
 from botocore.exceptions import BotoCoreError, ClientError
 from io import StringIO
 from datetime import datetime
 import json
+import sys
 # Load env variables from .env file
-load_dotenv()
-bucket_name = os.getenv("AWS_S3_BUCKET")
 
+
+raw_bucket_name = os.environ.get("AWS_RAW_S3_BUCKET") or sys.argv[sys.argv.index('--AWS_RAW_S3_BUCKET') + 1]
+quarantine_bucket_name = os.environ.get("AWS_QUARANTINE_S3_BUCKET") or sys.argv[sys.argv.index('--AWS_QUARANTINE_S3_BUCKET') + 1]
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s]: %(message)s")
 logger = logging.getLogger()
@@ -84,7 +85,7 @@ def quarantine_file(bucket, original_key ,reason):
     try:
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
         filename = os.path.basename(original_key)
-        quarantine_key = f"quarantine/{timestamp}_{filename}"
+        quarantine_key = f"pos/{timestamp}_{filename}"
 
         logger.warning(f"Quarantining file: {original_key} to {quarantine_key} | Reason: {reason}")
         
@@ -110,7 +111,7 @@ def main():
     "errors": []
     }
     
-    if not bucket_name:
+    if not raw_bucket_name:
         msg = "AWS_S3_BUCKET environment variable is not set."
         logger.error(msg)
         summary["errors"].append(msg)
@@ -118,7 +119,7 @@ def main():
 
     
     try:
-        files = list_files(bucket_name, "POS")
+        files = list_files(raw_bucket_name, "pos")
     except Exception as e:
         summary["errors"].append(str(e))
         return summary
@@ -129,16 +130,16 @@ def main():
     
     for file in files:
         try:
-            df = download_from_s3(f"s3://{bucket_name}/{file}")
+            df = download_from_s3(f"s3://{raw_bucket_name}/{file}")
             if df is None:
                 reason = "Failed to load file as DataFrame"
-                quarantine_file(bucket_name, file, reason)
+                quarantine_file(quarantine_bucket_name, file, reason)
                 summary["quarantined_files"].append({"file": file, "reason": reason})
                 continue
 
             is_valid, reason = validate_file(df, file)
             if not is_valid:
-                quarantine_file(bucket_name, file, reason)
+                quarantine_file(quarantine_bucket_name, file, reason)
                 summary["quarantined_files"].append({"file": file, "reason": reason})
             else:
                 summary["processed_files"] += 1
