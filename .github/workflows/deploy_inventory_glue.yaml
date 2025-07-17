@@ -28,14 +28,14 @@ jobs:
         aws-region: ${{ secrets.AWS_REGION }}
 
 
-    - name: Debug - Check glue.py size before upload
+    - name: Debug - Check inventory_validate.py size before upload
       run: |
-        ls -lh src/batch/inventory/services/glue_service/glue.py      
+        ls -lh src/batch/inventory/services/glue_service/inventory_validate.py      
 
     - name: Upload Glue Script to S3
       run: |
-        echo "Uploading src/batch/inventory/services/glue_service/glue.py to ${{ secrets.GLUE_SCRIPT_S3_PATH }}/glue.py"
-        aws s3 cp src/batch/inventory/services/glue_service/glue.py ${{ secrets.GLUE_SCRIPT_S3_PATH }}/glue.py
+        echo "Uploading src/batch/inventory/services/glue_service/inventory_validate.py to ${{ secrets.GLUE_SCRIPT_S3_PATH }}/inventory/inventory_validate.py"
+        aws s3 cp src/batch/inventory/services/glue_service/inventory_validate.py ${{ secrets.GLUE_SCRIPT_S3_PATH }}/inventory/inventory_validate.py
       env:
         # Use env variable for consistency and readability
         PROJECT_BUCKET: ${{ secrets.PROJECT_BUCKET }} 
@@ -43,13 +43,13 @@ jobs:
 
     - name: Debug - Check S3 object size after upload
       run: |
-        aws s3 ls s3://${{ secrets.PROJECT_BUCKET }}/scripts/glue/glue.py
-        aws s3api head-object --bucket ${{ secrets.PROJECT_BUCKET }} --key scripts/glue/glue.py
+        aws s3 ls s3://${{ secrets.PROJECT_BUCKET }}/scripts/glue/inventory/inventory_validate.py
+        aws s3api head-object --bucket ${{ secrets.PROJECT_BUCKET }} --key scripts/glue/inventory/inventory_validate.py
 
     - name: Deploy Glue Python Shell Job
       run: |
         JOB_NAME="inventory_validator"  # Your Glue job name
-        SCRIPT_LOCATION="s3://${{ secrets.PROJECT_BUCKET }}/scripts/glue/glue.py"
+        SCRIPT_LOCATION="s3://${{ secrets.PROJECT_BUCKET }}/scripts/glue/inventory/inventory_validate.py"
         ROLE_ARN="arn:aws:iam::985539772768:role/inventory_glue_role"
 
         # Check if job exists
@@ -89,26 +89,26 @@ jobs:
         fi
 
 
-    - name: Debug - Check glue_transform.py size before upload
+    - name: Debug - Check inventory_transform.py size before upload
       run: |
-        ls -lh src/batch/inventory/services/glue_service/glue_transform.py
+        ls -lh src/batch/inventory/services/glue_service/inventory_transform.py
 
     - name: Upload Glue Transform Script to S3
       run: |
-        echo "Uploading src/batch/inventory/services/glue_service/glue_transform.py to ${{ secrets.GLUE_SCRIPT_S3_PATH }}/glue_transform.py"
-        aws s3 cp src/batch/inventory/services/glue_service/glue_transform.py ${{ secrets.GLUE_SCRIPT_S3_PATH }}/glue_transform.py
+        echo "Uploading src/batch/inventory/services/glue_service/inventory_transform.py to ${{ secrets.GLUE_SCRIPT_S3_PATH }}/inventory_transform.py"
+        aws s3 cp src/batch/inventory/services/glue_service/inventory_transform.py ${{ secrets.GLUE_SCRIPT_S3_PATH }}/inventory_transform.py
       env:
         PROJECT_BUCKET: ${{ secrets.PROJECT_BUCKET }}
 
     - name: Debug - Check S3 object size after upload
       run: |
-        aws s3 ls s3://${{ secrets.PROJECT_BUCKET }}/scripts/glue/glue_transform.py
-        aws s3api head-object --bucket ${{ secrets.PROJECT_BUCKET }} --key scripts/glue/glue_transform.py
+        aws s3 ls s3://${{ secrets.PROJECT_BUCKET }}/scripts/glue/inventory/inventory_transform.py
+        aws s3api head-object --bucket ${{ secrets.PROJECT_BUCKET }} --key scripts/glue/inventory/inventory_transform.py
 
     - name: Deploy Glue Spark ETL Job
       run: |
         JOB_NAME="inventory_transform"  # Your Glue job name
-        SCRIPT_LOCATION="s3://${{ secrets.PROJECT_BUCKET }}/scripts/glue/glue_transform.py"
+        SCRIPT_LOCATION="s3://${{ secrets.PROJECT_BUCKET }}/scripts/glue/inventory/inventory_transform.py"
         ROLE_ARN="arn:aws:iam::985539772768:role/inventory_glue_role"
 
         # Check if job exists
@@ -131,7 +131,7 @@ jobs:
             "GlueVersion": "3.0",
             "MaxCapacity": 2,
             "Timeout": 2880,
-            "Description": "Glue Spark ETL job for inventory validation"
+            "Description": "Glue Spark ETL job for inventory transformation"
           }' --region ${{ secrets.AWS_REGION }}
         else
           echo "Creating Glue Spark ETL job $JOB_NAME"
@@ -144,6 +144,6 @@ jobs:
             --glue-version 3.0 \
             --max-capacity 2 \
             --timeout 2880 \
-            --description "Glue Spark ETL job for inventory validation" \
+            --description "Glue Spark ETL job for inventory transformation" \
             --region ${{ secrets.AWS_REGION }}
         fi

@@ -21,10 +21,10 @@ logging.basicConfig(
 
 PROJECT_BUCKET = "misc-gtp-proj"
 
-S3_INV_RAW_PATH = f"s3://{PROJECT_BUCKET}/inventory_landing_zone/raw"
-S3_INV_VALIDATED_PATH = f"s3://{PROJECT_BUCKET}/inventory_landing_zone/validated"
-S3_INV_REJECTED_PATH = f"s3://{PROJECT_BUCKET}/inventory_landing_zone/rejected"
-S3_LOG_PATH = f"s3://{PROJECT_BUCKET}/logs/glue/"
+S3_INV_RAW_PATH = f"s3://{PROJECT_BUCKET}/landing_zone/raw/inventory"
+S3_INV_VALIDATED_PATH = f"s3://{PROJECT_BUCKET}/landing_zone/validated/inventory"
+S3_INV_REJECTED_PATH = f"s3://{PROJECT_BUCKET}/landing_zone/rejected/inventory"
+S3_LOG_PATH = f"s3://{PROJECT_BUCKET}/logs/glue/inventory/validate"
 
 FILE_SIZE_THRESHOLD = 104857600  # 100MB
 CHUNK_SIZE = 52428800            # 50MB

@@ -35,9 +35,9 @@ logging.basicConfig(
 
 # AWS and S3 Configuration
 PROJECT_BUCKET = os.environ.get("PROJECT_BUCKET", "misc-gtp-proj")
-S3_INV_VALIDATED_PATH = f"s3://{PROJECT_BUCKET}/inventory_landing_zone/validated"
-S3_INV_PROCESSED_PATH = f"s3://{PROJECT_BUCKET}/inventory_landing_zone/processed/staging/inventory"
-S3_LOG_PATH = f"s3://{PROJECT_BUCKET}/logs/glue/"
+S3_INV_VALIDATED_PATH = f"s3://{PROJECT_BUCKET}/landing_zone/validatedinventory"
+S3_INV_PROCESSED_PATH = f"s3://{PROJECT_BUCKET}/landing_zone/processed/inventory"
+S3_LOG_PATH = f"s3://{PROJECT_BUCKET}/logs/glue/inventory/transform"
 MAX_RETRY_ATTEMPTS = 3
 
 # Spark Configuration
@@ -344,7 +344,7 @@ if __name__ == "__main__":
     try:
         main()
         logger.info("Job completed successfully")
-        sys.exit(0)
+        # sys.exit(0)
     except Exception as e:
         logger.error(f"Job failed with error: {e}", exc_info=True)
         sys.exit(1)

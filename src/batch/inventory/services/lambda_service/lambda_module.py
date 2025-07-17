@@ -29,7 +29,7 @@ S3_BUCKET = os.environ.get('PROJECT_BUCKET', 'misc-gtp-proj')
 LOG_FILE_PREFIX = os.environ.get('LOG_FILE_PREFIX')
 BATCH_SOURCE_BUCKET = os.environ.get('BATCH_SOURCE_BUCKET', 'batch-data-source-v1')
 INVENTORY_SOURCE_PREFIX = os.environ.get('INVENTORY_SOURCE_PREFIX', 'inventory/')
-S3_RAW_PATH = f"s3://{S3_BUCKET}/inventory_landing_zone/raw"
+S3_RAW_PATH = f"s3://{S3_BUCKET}/landing_zone/raw"
 
 MAX_BATCH_SIZE = 100
 MAX_RETRIES = 3
