@@ -128,7 +128,7 @@ jobs:
             },
             "MaxRetries": 1,
             "GlueVersion": "3.0",
-            "MaxCapacity": 2,                             # Adjusted for Spark job
+            "MaxCapacity": 2,
             "Timeout": 2880,
             "Description": "Glue Spark ETL job for inventory validation"
           }' --region ${{ secrets.AWS_REGION }}
