@@ -5,9 +5,8 @@ import logging
 import boto3
 import requests
 from botocore.exceptions import BotoCoreError, ClientError
-from requests.exceptions import RequestException
+from requests.exceptions import HTTPError, RequestException
 from datetime import datetime
-
 
 # Configuration from environment or defaults
 API_URL = os.getenv("API_URL")
@@ -19,11 +18,9 @@ REGION = os.getenv("REGION") or os.getenv("AWS_REGION")
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", 1))
 MAX_RETRIES_ON_KINESIS = 3
 
-
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
-
 
 # Validate required env vars early
 required_env_vars = ["API_URL", "KINESIS_STREAM_NAME"]
@@ -32,12 +29,10 @@ if missing_vars:
     logger.error(f"Missing required environment variables: {missing_vars}")
     exit(1)
 
-
 # AWS clients
 kinesis = boto3.client("kinesis", region_name=REGION)
 s3 = boto3.client("s3", region_name=REGION)
 sns = boto3.client("sns", region_name=REGION)
-
 
 EXPECTED_SCHEMA = {
     "session_id": str,
@@ -49,10 +44,8 @@ EXPECTED_SCHEMA = {
     "timestamp": (float, int)
 }
 
-
 def validate_record(record):
     for field, expected_type in EXPECTED_SCHEMA.items():
-        # Required fields check
         if field not in record:
             logger.warning(f"Missing required field '{field}'")
             return False
@@ -65,7 +58,6 @@ def validate_record(record):
             logger.warning(f"Field '{field}' has wrong type. Got {type(value)}, expected {expected_type}")
             return False
     return True
-
 
 def upload_to_s3(data):
     if not ERROR_S3_BUCKET:
@@ -97,7 +89,6 @@ def upload_to_s3(data):
     except (BotoCoreError, ClientError) as e:
         logger.error(f"Failed to upload or notify: {e}")
 
-
 def upload_valid_record_to_s3(data):
     if not VALID_DATA_S3_BUCKET:
         logger.warning("VALID_DATA_S3_BUCKET not set, skipping upload of valid record to S3.")
@@ -114,7 +105,6 @@ def upload_valid_record_to_s3(data):
         logger.info(f"Uploaded valid record to s3://{VALID_DATA_S3_BUCKET}/{key}")
     except (BotoCoreError, ClientError) as e:
         logger.error(f"Failed to upload valid record to S3: {e}")
-
 
 def stream_to_kinesis(data):
     partition_key = data.get("session_id") or f"fallback-{int(time.time())}"
@@ -133,7 +123,6 @@ def stream_to_kinesis(data):
     logger.error("Giving up on sending record to Kinesis after retries.")
     return False
 
-
 def process_event(event):
     if validate_record(event):
         upload_valid_record_to_s3(event)
@@ -142,13 +131,25 @@ def process_event(event):
     else:
         upload_to_s3(event)  # upload invalid record to error bucket
 
-
 def poll_api():
     while True:
         try:
             logger.info("Polling API...")
             response = requests.get(API_URL, timeout=10)
-            response.raise_for_status()
+            try:
+                response.raise_for_status()
+            except HTTPError as e:
+                if response.status_code == 404:
+                    logger.warning(f"API returned 404 Not Found: {API_URL}")
+                    # Add optional special logic for 404 errors here (e.g., break, exit, notify, etc.)
+                    # For example, to stop polling on 404, uncomment next line:
+                    # break
+                else:
+                    logger.error(f"API HTTP error ({response.status_code}): {e}")
+                # Always sleep before next poll after HTTP errors
+                time.sleep(POLL_INTERVAL)
+                continue  # Don't process further on HTTP error
+
             data = response.json()
 
             # Support single event or list of events
@@ -164,7 +165,6 @@ def poll_api():
             logger.exception(f"Unexpected error: {e}")
 
         time.sleep(POLL_INTERVAL)
-
 
 if __name__ == "__main__":
     poll_api()
