@@ -48,7 +48,7 @@ jobs:
                 --arg script "$SCRIPT_LOCATION" \
                 --arg raw "${{ secrets.BATCH_SOURCE_BUCKET }}" \
                 --arg delta "${{ secrets.BATCH_DELTA_BUCKET }}" \
-                --arg logs "${{ secrets.GLUE_SCRIPT_S3_PATH }}" \
+                --arg logs "${{ secrets.GLUE_LOGS_S3_PATH }}" \
                 '{
                   Role: $role,
                   Command: {
@@ -60,9 +60,9 @@ jobs:
                     "--job-language": "python",
                     "--enable-continuous-cloudwatch-log": "true",
                     "--enable-spark-ui": "true",
-                    "--spark-event-logs-path": ($logs + "/spark-logs"),
+                    "--spark-event-logs-path": ($logs + "/glue/pos/"),
                     "--extra-py-files": "",
-                    "--TempDir": ($logs + "/temp"),
+                    "--TempDir": ($logs + "/glue/pos/temp"),
                     "--datalake-formats": "delta",
                     "--POS_S3_BUCKET": $raw,
                     "--POS_DELTA_BUCKET": $delta,
@@ -85,10 +85,10 @@ jobs:
                 "--job-language": "python",
                 "--enable-continuous-cloudwatch-log": "true",
                 "--enable-spark-ui": "true",
-                "--spark-event-logs-path": "${{ secrets.GLUE_SCRIPT_S3_PATH }}/spark-logs",
+                "--spark-event-logs-path": "${{ secrets.GLUE_SCRIPT_S3_PATH }}/glue/pos/",
                 "--extra-py-files": "",
                 "--datalake-formats": "delta",
-                "--TempDir": "${{ secrets.GLUE_SCRIPT_S3_PATH }}/temp",
+                "--TempDir": "${{ secrets.GLUE_SCRIPT_S3_PATH }}/glue/pos/temp",
                 "--POS_S3_BUCKET": "${{ secrets.BATCH_SOURCE_BUCKET }}",
                 "--POS_DELTA_BUCKET": "${{ secrets.BATCH_DELTA_BUCKET }}",
                 "--conf": "spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension --conf spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog"
