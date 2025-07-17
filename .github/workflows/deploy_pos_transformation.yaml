@@ -48,6 +48,7 @@ jobs:
                 --arg script "$SCRIPT_LOCATION" \
                 --arg raw "${{ secrets.BATCH_SOURCE_BUCKET }}" \
                 --arg delta "${{ secrets.BATCH_DELTA_BUCKET }}" \
+                --arg logs "${{ secrets.GLUE_SCRIPT_S3_PATH }}" \
                 '{
                   Role: $role,
                   Command: {
@@ -59,9 +60,9 @@ jobs:
                     "--job-language": "python",
                     "--enable-continuous-cloudwatch-log": "true",
                     "--enable-spark-ui": "true",
-                    "--spark-event-logs-path": "${{ secrets.GLUE_SCRIPT_S3_PATH }}/spark-logs",
+                    "--spark-event-logs-path": ($logs + "/spark-logs"),
                     "--extra-py-files": "",
-                    "--TempDir": "${{ secrets.GLUE_SCRIPT_S3_PATH }}/temp",
+                    "--TempDir": ($logs + "/temp"),
                     "--datalake-formats": "delta",
                     "--POS_S3_BUCKET": $raw,
                     "--POS_DELTA_BUCKET": $delta,
@@ -69,8 +70,7 @@ jobs:
                   },
                   GlueVersion: "5.0",
                   NumberOfWorkers: 2,
-                  WorkerType: "G.1X"
-                  MaxCapacity: 2.0,
+                  WorkerType: "G.1X",
                   ExecutionProperty: {
                     MaxConcurrentRuns: 1
                   }
