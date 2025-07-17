@@ -110,7 +110,7 @@ def write_logs_to_s3(log_messages: List[str], job_name: str) -> None:
     try:
         s3_client = create_s3_client()
         timestamp = datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S")
-        log_key = f"{S3_LOG_PATH.replace(f's3://{PROJECT_BUCKET}/', '')}{job_name}/log_{timestamp}.log"
+        log_key = f"{S3_LOG_PATH.replace(f's3://{PROJECT_BUCKET}/', '')}log_{timestamp}.log"
 
         # Create structured log entries
         structured_logs = []
@@ -344,7 +344,7 @@ if __name__ == "__main__":
     try:
         main()
         logger.info("Job completed successfully")
-        # sys.exit(0)
+        ## sys.exit(0)
     except Exception as e:
         logger.error(f"Job failed with error: {e}", exc_info=True)
         sys.exit(1)
