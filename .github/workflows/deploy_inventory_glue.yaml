@@ -124,7 +124,8 @@ jobs:
             "DefaultArguments": {
               "--enable-continuous-cloudwatch-log": "true",
               "--enable-glue-datacatalog": "true",
-              "--job-language": "python"
+              "--job-language": "python",
+              "--datalake-formats": "delta"
             },
             "MaxRetries": 1,
             "GlueVersion": "3.0",
@@ -138,7 +139,7 @@ jobs:
             --name $JOB_NAME \
             --role $ROLE_ARN \
             --command Name=glueetl,ScriptLocation=$SCRIPT_LOCATION,PythonVersion=3 \
-            --default-arguments '{"--enable-continuous-cloudwatch-log":"true","--enable-glue-datacatalog":"true","--job-language":"python"}' \
+            --default-arguments '{"--enable-continuous-cloudwatch-log":"true","--enable-glue-datacatalog":"true","--job-language":"python","--datalake-formats": "delta"}' \
             --max-retries 1 \
             --glue-version 3.0 \
             --max-capacity 2 \
