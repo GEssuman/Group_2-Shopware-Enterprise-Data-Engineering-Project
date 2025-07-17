@@ -71,7 +71,7 @@ jobs:
             "GlueVersion": "3.0",
             "MaxCapacity": 0.0625,
             "Timeout": 2880,
-            "Description": "Python Shell Glue job for lab6"
+            "Description": "Python Shell Glue job for inventory validation"
           }' --region ${{ secrets.AWS_REGION }}
         else
           echo "Creating Glue job $JOB_NAME"
@@ -84,6 +84,6 @@ jobs:
             --glue-version 3.0 \
             --max-capacity 0.0625 \
             --timeout 2880 \
-            --description "Python Shell Glue job for lab6" \
+            --description "Python Shell Glue job for inventory validation" \
             --region ${{ secrets.AWS_REGION }}
         fi
