@@ -1,0 +1,101 @@
+name: Deploy Glue Spark Job with Delta Support
+
+on:
+  push:
+    branches:
+      - feature/POS-batch
+    paths:
+      - src/batch/pos/services/glue_job/transfom_pos.py
+      - .github/workflows/deploy_pos_transformation.yaml
+
+jobs:
+  deploy-glue-spark-job:
+    runs-on: ubuntu-latest
+
+    env:
+      SCRIPT_PATH: src/batch/pos/services/glue_job/transfom_pos.py
+      SCRIPT_S3_KEY: pos/transfom_pos.py
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up AWS CLI
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Upload Glue script to S3
+        run: |
+          echo "Uploading ${SCRIPT_PATH} to ${{ secrets.GLUE_SCRIPT_S3_PATH }}/$SCRIPT_S3_KEY"
+          aws s3 cp "$SCRIPT_PATH" "${{ secrets.GLUE_SCRIPT_S3_PATH }}/$SCRIPT_S3_KEY"
+
+      - name: Create or Update Glue Spark Job
+        run: |
+          JOB_NAME="POS-transformation-job"
+          SCRIPT_LOCATION="${{ secrets.GLUE_SCRIPT_S3_PATH }}/$SCRIPT_S3_KEY"
+          ROLE_ARN="arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/AWSShopware-Validator-Role"
+          
+          echo "Checking if Glue job $JOB_NAME exists..."
+          if aws glue get-job --job-name "$JOB_NAME" >/dev/null 2>&1; then
+            echo "Updating existing Glue Spark job: $JOB_NAME"
+            aws glue update-job \
+              --job-name "$JOB_NAME" \
+              --job-update "$(jq -n \
+                --arg role "$ROLE_ARN" \
+                --arg script "$SCRIPT_LOCATION" \
+                --arg raw "${{ secrets.BATCH_SOURCE_BUCKET }}" \
+                --arg delta "${{ secrets.BATCH_DELTA_BUCKET }}" \
+                '{
+                  Role: $role,
+                  Command: {
+                    Name: "glueetl",
+                    ScriptLocation: $script,
+                    PythonVersion: "3"
+                  },
+                  DefaultArguments: {
+                    "--job-language": "python",
+                    "--enable-continuous-cloudwatch-log": "true",
+                    "--enable-spark-ui": "true",
+                    "--spark-event-logs-path": "${{ secrets.GLUE_SCRIPT_S3_PATH }}/spark-logs",
+                    "--extra-py-files": "",
+                    "--TempDir": "${{ secrets.GLUE_SCRIPT_S3_PATH }}/temp",
+                    "--datalake-formats": "delta",
+                    "--POS_S3_BUCKET": $raw,
+                    "--POS_DELTA_BUCKET": $delta,
+                    "--conf": "spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension --conf spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog"
+                  },
+                  GlueVersion: "5.0",
+                  NumberOfWorkers: 2,
+                  WorkerType: "G.1X"
+                  MaxCapacity: 2.0,
+                  ExecutionProperty: {
+                    MaxConcurrentRuns: 1
+                  }
+                }')"
+          else
+            echo "Creating new Glue Spark job: $JOB_NAME"
+            aws glue create-job \
+              --name "$JOB_NAME" \
+              --role "$ROLE_ARN" \
+              --command Name=glueetl,ScriptLocation="$SCRIPT_LOCATION",PythonVersion=3 \
+              --default-arguments '{
+                "--job-language": "python",
+                "--enable-continuous-cloudwatch-log": "true",
+                "--enable-spark-ui": "true",
+                "--spark-event-logs-path": "${{ secrets.GLUE_SCRIPT_S3_PATH }}/spark-logs",
+                "--extra-py-files": "",
+                "--datalake-formats": "delta",
+                "--TempDir": "${{ secrets.GLUE_SCRIPT_S3_PATH }}/temp",
+                "--POS_S3_BUCKET": "${{ secrets.BATCH_SOURCE_BUCKET }}",
+                "--POS_DELTA_BUCKET": "${{ secrets.BATCH_DELTA_BUCKET }}",
+                "--conf": "spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension --conf spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog"
+              }' \
+              --glue-version "5.0" \
+              --max-capacity 2.0 \
+              --execution-property MaxConcurrentRuns=1 \
+              --number-of-workers 2 \
+              --worker-type "G.1X"
+          fi

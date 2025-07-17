@@ -5,7 +5,7 @@ on:
     branches:
       - feature/POS-batch
     paths:
-      - glue_jobs/validate.py
+      - src/batch/pos/services/validator/validate.py
       - .github/workflows/deploy_pos_validator.yaml
 
 jobs:

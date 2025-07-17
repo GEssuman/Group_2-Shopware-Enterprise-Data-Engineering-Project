@@ -19,10 +19,10 @@ spark = glueContext.spark_session
 
 
 # Get job arguments
-args = getResolvedOptions(sys.argv, ['JOB_NAME', 'POS_S3_BUCKET', 'POS_DELTA_PATH'])
-delta_path = args['POS_DELTA_PATH']
+args = getResolvedOptions(sys.argv, ['JOB_NAME', 'POS_S3_BUCKET', 'POS_DELTA_BUCKET'])
+delta_path = f"s3://{args['POS_DELTA_BUCKET']}/pos"
 
-s3_input_path = f"s3://{args['POS_S3_BUCKET']}/POS/"
+s3_input_path = f"s3://{args['POS_S3_BUCKET']}/pos"
 
 schema = StructType([
     StructField("transaction_id", StringType()),
