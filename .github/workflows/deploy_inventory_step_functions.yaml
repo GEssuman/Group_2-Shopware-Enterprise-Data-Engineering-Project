@@ -38,7 +38,7 @@ jobs:
           else
             echo "Step Function JSON has syntax errors according to jq."
             exit 1
-          fi
+        fi
         else
           echo "Step Function JSON file not found at $SF_DEFINITION_PATH"
           exit 1
