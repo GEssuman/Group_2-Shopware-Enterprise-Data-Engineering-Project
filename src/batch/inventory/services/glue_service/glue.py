@@ -134,16 +134,29 @@ def get_files_to_process(incoming_path: str) -> List[Dict]:
 def read_jsonl_from_s3(file_key: str) -> pd.DataFrame:
     try:
         response = s3_client.get_object(Bucket=PROJECT_BUCKET, Key=file_key)
-        content = response['Body'].read().decode('utf-8')
+        content = response['Body'].read().decode('utf-8').strip()
         records = []
-        for line_num, line in enumerate(content.strip().split('\n'), 1):
-            if line.strip():
-                try:
-                    record = json.loads(line)
-                    records.append(record)
-                except json.JSONDecodeError as e:
-                    logger.error(f"Invalid JSON at line {line_num}: {e}")
-                    raise
+        # If file starts with '[', treat as a single JSON array
+        if content.startswith('['):
+            try:
+                array = json.loads(content)
+                if isinstance(array, list):
+                    records.extend(array)
+                else:
+                    logger.error(f"Top-level JSON is not an array in {file_key}")
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse JSON array: {e}")
+                raise
+        else:
+            # Parse as JSONL
+            for line_num, line in enumerate(content.split('\n'), 1):
+                if line.strip():
+                    try:
+                        record = json.loads(line)
+                        records.append(record)
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Invalid JSON at line {line_num}: {e}")
+                        raise
         if not records:
             return pd.DataFrame()
         df = pd.DataFrame(records)
@@ -152,6 +165,7 @@ def read_jsonl_from_s3(file_key: str) -> pd.DataFrame:
     except Exception as e:
         logger.error(f"Failed to read {file_key}: {e}")
         raise
+
 
 def read_chunked_jsonl_from_s3(file_key: str, file_size: int) -> pd.DataFrame:
     logger.info(f"Reading large file {file_key} in chunks")
@@ -312,7 +326,7 @@ def move_s3_object(source_key: str, dest_path: str) -> None:
                 ServerSideEncryption='AES256'
             )
             # Delete original
-            s3_client.delete_object(Bucket=PROJECT_BUCKET, Key=source_key)
+            #s3_client.delete_object(Bucket=PROJECT_BUCKET, Key=source_key)
             logger.info(f"Moved {source_key} to s3://{dest_bucket}/{dest_key}")
         except ClientError as e:
             logger.error(f"Failed to move {source_key}: {e}")

@@ -68,6 +68,6 @@ jobs:
       run: |
         aws lambda update-function-configuration \
           --function-name ${{ secrets.LAMBDA_FUNCTION_NAME }} \
-          --environment "Variables={PROJECT_BUCKET=${{ secrets.PROJECT_BUCKET }},LOG_FILE_PREFIX=logs/lambda,STATE_MACHINE_ARN=${{ secrets.STATE_MACHINE_ARN }}}" \
+          --environment "Variables={PROJECT_BUCKET=${{ secrets.PROJECT_BUCKET }},LOG_FILE_PREFIX=logs/lambda/log,STATE_MACHINE_ARN=${{ secrets.STATE_MACHINE_ARN }}}" \
           --region ${{ secrets.AWS_REGION }}
 
