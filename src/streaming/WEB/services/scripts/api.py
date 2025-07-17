@@ -15,7 +15,7 @@ S3_BUCKET = os.getenv("S3_BUCKET")
 EXTRA_COLUMNS_S3_FOLDER = "extra_columns"
 FAILED_RECORDS_SNS_ARN = os.getenv("FAILED_RECORDS_SNS_ARN")
 REGION = os.getenv("REGION") or os.getenv("AWS_REGION")
-POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", 1))  # Default to 1s if unset
+POLL_INTERVAL = float(os.getenv("POLL_INTERVAL", 1))  # Default to 1s if unset
 MAX_RETRIES_ON_KINESIS = 3
 
 # Batch config (adjust as needed)
