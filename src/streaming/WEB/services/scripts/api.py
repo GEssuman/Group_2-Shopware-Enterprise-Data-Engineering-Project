@@ -16,7 +16,7 @@ ERROR_S3_BUCKET = os.getenv("ERROR_S3_BUCKET")
 VALID_DATA_S3_BUCKET = os.getenv("VALID_DATA_S3_BUCKET")  # New bucket for valid data
 FAILED_RECORDS_SNS_ARN = os.getenv("FAILED_RECORDS_SNS_ARN")
 REGION = os.getenv("REGION") or os.getenv("AWS_REGION")
-POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", 6))
+POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", 1))
 MAX_RETRIES_ON_KINESIS = 3
 
 

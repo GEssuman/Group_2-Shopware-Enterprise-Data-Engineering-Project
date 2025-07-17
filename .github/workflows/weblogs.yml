@@ -6,7 +6,6 @@ on:
       - 'src/streaming/WEB/services/scripts/**'
       - 'src/streaming/WEB/services/docker/**'
       - 'src/streaming/WEB/services/ecs/**'
-      - 'src/streaming/WEB/services/lambda/**'
       - '.github/workflows/weblogs.yml'
     branches:
       - feature/weblogs
@@ -14,12 +13,6 @@ on:
 env:
   # API image repository
   ECR_REPOSITORY_API: weblogs/api-gtp
-  # Lambda related env (validation & transformation)
-  LAMBDA_FUNCTION_NAME: weblogs-lambda
-  LAMBDA_RUNTIME: python3.10
-  LAMBDA_HANDLER: lambda_function.lambda_handler
-  LAMBDA_ROLE_ARN: arn:aws:iam::985539772768:role/service-role/weblogs-lambda-role-1awjd0og
-  LAMBDA_SOURCE_PATH: src/streaming/WEB/services/lambda/
 
 jobs:
   build-and-push-ecr:
@@ -114,53 +107,3 @@ jobs:
             --task-definition "$TASK_DEF_ARN_API" \
             --force-new-deployment \
             --network-configuration "awsvpcConfiguration={subnets=[subnet-0a3d6890884fa19d2,subnet-0e77aaa29a6fe5946],securityGroups=[sg-0d23674697d6a5c88],assignPublicIp=DISABLED}"
-
-  deploy-lambda:
-    runs-on: ubuntu-latest
-    needs: build-and-push-ecr
-    env:
-      AWS_REGION: ${{ secrets.AWS_REGION }}
-      LAMBDA_FUNCTION_NAME: weblogs-lambda
-      LAMBDA_RUNTIME: python3.10
-      LAMBDA_HANDLER: lambda_function.lambda_handler
-      LAMBDA_ROLE_ARN: arn:aws:iam::985539772768:role/service-role/weblogs-lambda-role-1awjd0og
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-
-      - name: Zip Lambda function
-        run: |
-          cd src/streaming/WEB/services/lambda
-          zip ../../../lambda-package.zip transformation.py
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Create or update Lambda function
-        run: |
-          if aws lambda get-function --function-name $LAMBDA_FUNCTION_NAME > /dev/null 2>&1; then
-            echo "Lambda function exists, updating code..."
-            aws lambda update-function-code \
-              --function-name $LAMBDA_FUNCTION_NAME \
-              --zip-file fileb://lambda-package.zip
-          else
-            echo "Lambda function not found, creating..."
-            aws lambda create-function \
-              --function-name $LAMBDA_FUNCTION_NAME \
-              --runtime $LAMBDA_RUNTIME \
-              --role $LAMBDA_ROLE_ARN \
-              --handler $LAMBDA_HANDLER \
-              --zip-file fileb://lambda-package.zip \
-              --timeout 60 \
-              --memory-size 512
-          fi
