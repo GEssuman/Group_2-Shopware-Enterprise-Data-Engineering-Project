@@ -5,11 +5,15 @@ import logging
 from botocore.exceptions import BotoCoreError, ClientError
 from io import StringIO
 from datetime import datetime
+from dotenv import load_dotenv
 import json
 import sys
-# Load env variables from .env file
 
+load_dotenv()
 
+raw_bucket_name = os.environ.get("AWS_SOURCE_S3_BUCKET") or sys.argv[sys.argv.index('--AWS_SOURCE_S3_BUCKET') + 1]
+etl_landing_bucket_name = os.environ.get("ETL_LANDING_S3_BUCKET") or sys.argv[sys.argv.index('--ETL_LANDING_S3_BUCKET') + 1]
+event_time = os.environ.get("EVENT_TIME") or sys.argv[sys.argv.index('--EVENT_TIME') + 1]
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s]: %(message)s")
 logger = logging.getLogger()
@@ -81,11 +85,10 @@ def quarantine_file(bucket, original_key ,reason):
     Move the invalid file to a 'quarantine/' folder in the same S3 bucket.
     """
     try:
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        filename = os.path.basename(original_key)
-        quarantine_key = f"pos/{timestamp}_{filename}"
-
         logger.warning(f"Quarantining file: {original_key} to {quarantine_key} | Reason: {reason}")
+
+        filename = os.path.basename(original_key)
+        quarantine_key = f"landing_zone/rejected/pos/{event_time}_{filename}"
         
         # Copy file to quarantine location
         s3.copy_object(
@@ -101,11 +104,36 @@ def quarantine_file(bucket, original_key ,reason):
     except Exception as e:
         logger.error(f"Failed to quarantine file {original_key}: {e}")
 
+def write_result_to_s3(result: dict):
+    key = f"landing_zone/validated/pos/pos-validation-result/validation_summary_{event_time}.json"
+    s3_uri = f"s3://{etl_landing_bucket_name}/{key}"
+
+    try:
+        logger.info(f"Writing validation summary to {s3_uri}")
+        s3.put_object(
+            Bucket=etl_landing_bucket_name,
+            Key=key,
+            Body=json.dumps(result),
+            ContentType="application/json"
+        )
+        logger.info(f"Successfully wrote validation summary to {s3_uri}")
+        return s3_uri
+    except (BotoCoreError, ClientError) as e:
+        error_msg = f"Failed to write validation summary to S3 at {s3_uri}: {e}"
+        logger.error(error_msg)
+        # Optionally re-raise if critical
+        # raise
+        result["errors"].append(error_msg)
+        return None
+    except Exception as e:
+        fallback_error = f"Unexpected error during write to S3: {e}"
+        logger.exception(fallback_error)
+        result["errors"].append(fallback_error)
+        return None
+
+
 def main():
-    raw_bucket_name = os.environ.get("AWS_RAW_S3_BUCKET") or sys.argv[sys.argv.index('--AWS_RAW_S3_BUCKET') + 1]
-    quarantine_bucket_name = os.environ.get("AWS_QUARANTINE_S3_BUCKET") or sys.argv[sys.argv.index('--AWS_QUARANTINE_S3_BUCKET') + 1]
-
-
+   
     summary = {
     "processed_files": 0,
     "quarantined_files": [],
@@ -134,13 +162,13 @@ def main():
             df = download_from_s3(f"s3://{raw_bucket_name}/{file}")
             if df is None:
                 reason = "Failed to load file as DataFrame"
-                quarantine_file(quarantine_bucket_name, file, reason)
+                quarantine_file(etl_landing_bucket_name, file, reason)
                 summary["quarantined_files"].append({"file": file, "reason": reason})
                 continue
 
             is_valid, reason = validate_file(df, file)
             if not is_valid:
-                quarantine_file(quarantine_bucket_name, file, reason)
+                quarantine_file(etl_landing_bucket_name, file, reason)
                 summary["quarantined_files"].append({"file": file, "reason": reason})
             else:
                 summary["processed_files"] += 1
@@ -155,8 +183,20 @@ def main():
 
 
 if __name__ == "__main__":
-    result = main()
+    try:
+        result = main()
+    except Exception as e:
+        logger.exception("Unhandled exception occurred in validation job.")
+        result = {
+            "processed_files": 0,
+            "quarantined_files": [],
+            "errors": [f"Unhandled exception: {str(e)}"]
+        }
 
-    # Log to Glue console
     logger.info(f"Job Summary: {json.dumps(result)}")
-    print(json.dumps(result))
+    try:
+        write_result_to_s3(result)
+    except Exception as write_err:
+        logger.error(f"Failed to write result to S3: {write_err}")
+        # Optional: fallback print
+        print(json.dumps(result))
