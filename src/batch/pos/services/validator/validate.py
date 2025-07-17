@@ -5,11 +5,11 @@ import logging
 from botocore.exceptions import BotoCoreError, ClientError
 from io import StringIO
 from datetime import datetime
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
 import json
 import sys
 
-load_dotenv()
+# load_dotenv()
 
 raw_bucket_name = os.environ.get("AWS_SOURCE_S3_BUCKET") or sys.argv[sys.argv.index('--AWS_SOURCE_S3_BUCKET') + 1]
 etl_landing_bucket_name = os.environ.get("ETL_LANDING_S3_BUCKET") or sys.argv[sys.argv.index('--ETL_LANDING_S3_BUCKET') + 1]
