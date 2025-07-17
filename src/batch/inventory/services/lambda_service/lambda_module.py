@@ -456,7 +456,8 @@ def start_single_step_function_execution(payload: Dict[str, Any]) -> Optional[st
 def start_step_function_with_chunks(chunks: List[List[Dict[str, Any]]], 
                                    correlation_id: str, 
                                    error_messages: List[str],
-                                   file_movement_results: Dict[str, Any] = None) -> Optional[str]:
+                                   file_movement_results: Dict[str, Any] = None,
+                                   input_path: Optional[str] = None) -> Optional[str]:
     """
     Start Step Function execution with chunked messages sent sequentially.
     
@@ -481,6 +482,7 @@ def start_step_function_with_chunks(chunks: List[List[Dict[str, Any]]],
         'total_messages': total_messages,
         'parsing_errors': error_messages,
         'file_movement_results': file_movement_results or {},
+        'input_path': input_path,
         'chunks': []
     }
     
@@ -554,6 +556,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     log_message = f"[{correlation_id}] Lambda started - Processing {len(records)} SQS messages"
     logger.info(log_message)
     write_log_to_s3(log_message, 'INFO')
+
+    # Define the S3 input path for the Step Function
+    # It represents the base S3 location where raw inventory files are moved.
+    s3_input_path = S3_RAW_PATH
     
     # Initialize file movement results
     file_movement_results = {}
@@ -643,7 +649,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 'inventory_updates': valid_messages,
                 'batch_size': len(valid_messages),
                 'parsing_errors': error_messages,
-                'file_movement_results': file_movement_results
+                'file_movement_results': file_movement_results,
+                'input_path': s3_input_path
             }
             
             # Start Step Function execution
@@ -682,7 +689,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             logger.info(log_message)
             write_log_to_s3(log_message, 'INFO')
             
-            execution_arn = start_step_function_with_chunks(valid_chunks, correlation_id, error_messages, file_movement_results)
+            execution_arn = start_step_function_with_chunks(valid_chunks, correlation_id, error_messages, file_movement_results, s3_input_path)
         
         if execution_arn:
             log_message = f"[{correlation_id}] Step Function started successfully: {execution_arn}"
