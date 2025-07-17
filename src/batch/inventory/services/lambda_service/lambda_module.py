@@ -160,7 +160,7 @@ def move_file_to_raw_zone(source_key: str, correlation_id: str) -> Tuple[bool, s
         # Generate destination key with timestamp for uniqueness
         timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
         filename = os.path.basename(source_key)
-        destination_key = f"inventory_landing_zone/raw/{timestamp}_{filename}"
+        destination_key = f"landing_zone/raw/inventory/{timestamp}_{filename}"
         
         # Copy the file to the destination
         copy_source = {
