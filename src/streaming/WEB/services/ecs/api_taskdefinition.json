@@ -22,7 +22,7 @@
         },
         {
           "name": "POLL_INTERVAL",
-          "value": "0.03"
+          "value": "0.05"
         },
         {
           "name": "REGION",
@@ -33,11 +33,7 @@
           "value": "arn:aws:sns:us-east-1:985539772768:validation_fail_weblogs:3a6b908f-0dad-4c85-96ac-3f5e03f00a80"
         },
           {
-          "name": "ERROR_S3_BUCKET",
-          "value": "weblogs-bucket-gtp"
-        },
-        {
-          "name": "VALID_DATA_S3_BUCKET",
+          "name": "S3_BUCKET",
           "value": "weblogs-bucket-gtp"
         }
       ],
