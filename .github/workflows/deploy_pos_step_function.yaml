@@ -3,8 +3,7 @@ name: Deploy Step Function
 on:
   push:
     branches:
-      - dev
-      - feature/stepfunctions
+     - feature/POS-bath
     paths:
       - src/batch/pos/services/workflow/pos_step_function.asl.json
       - .github/workflows/deploy_pos_step_function.yaml
