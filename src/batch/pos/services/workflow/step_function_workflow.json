@@ -1,0 +1,104 @@
+{
+  "StartAt": "SetEventTime",
+  "States": {
+    "SetEventTime": {
+      "Type": "Pass",
+      "Result": "2833829",
+      "ResultPath": "$.event_time",
+      "Next": "ValidateFiles"
+    },
+    "ValidateFiles": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "POS-validator",
+        "Arguments": {
+          "--EVENT_TIME.$": "States.Format('{}', $.event_time)"
+        }
+      },
+      "ResultPath": "$.validation_result",
+      "Next": "Fetch Validation Result"
+    },
+    "Fetch Validation Result": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:s3:getObject",
+      "Parameters": {
+        "Bucket": "misc-gtp-proj",
+        "Key.$": "States.Format('landing_zone/validated/pos/pos-validation-result/validation_summary_{}.json', $.event_time)"
+      },
+      "ResultSelector": {
+        "Body.$": "States.StringToJson($.Body)"
+      },
+      "ResultPath": "$.validationOutput",
+      "Next": "CheckValidationOutcome"
+    },
+    "CheckValidationOutcome": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.validationOutput.Body.processed_files",
+          "NumericGreaterThan": 0,
+          "Next": "ProcessValidFiles"
+        }
+      ],
+      "Default": "NotifyAllQuarantined"
+    },
+    "ProcessValidFiles": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "ContinueETL",
+          "States": {
+            "ContinueETL": {
+              "Type": "Pass",
+              "Result": "Validation checkpoint passed",
+              "ResultPath": "$.validationStatus",
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "CheckQuarantine",
+          "States": {
+            "CheckQuarantine": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.validation_result.quarantined_files[0]",
+                  "IsPresent": true,
+                  "Next": "SendPartialQuarantineNotification"
+                }
+              ],
+              "Default": "NoQuarantine"
+            },
+            "SendPartialQuarantineNotification": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::sns:publish",
+              "Parameters": {
+                "TopicArn": "arn:aws:sns:us-east-1:985539772768:pos-pipeline-notification",
+                "Message": {
+                  "Fn::Sub": "Partial quarantine detected: ${$.validation_result.quarantined_files}"
+                }
+              },
+              "End": true
+            },
+            "NoQuarantine": {
+              "Type": "Pass",
+              "End": true
+            }
+          }
+        }
+      ],
+      "End": true
+    },
+    "NotifyAllQuarantined": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "arn:aws:sns:us-east-1:985539772768:pos-pipeline-notification",
+        "Message": "All input files were quarantined. No processing done."
+      },
+      "End": true
+    }
+  }
+}
