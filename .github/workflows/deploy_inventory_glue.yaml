@@ -95,8 +95,8 @@ jobs:
 
     - name: Upload Glue Transform Script to S3
       run: |
-        echo "Uploading src/batch/inventory/services/glue_service/inventory_transform.py to ${{ secrets.GLUE_SCRIPT_S3_PATH }}/inventory_transform.py"
-        aws s3 cp src/batch/inventory/services/glue_service/inventory_transform.py ${{ secrets.GLUE_SCRIPT_S3_PATH }}/inventory_transform.py
+        echo "Uploading src/batch/inventory/services/glue_service/inventory_transform.py to ${{ secrets.GLUE_SCRIPT_S3_PATH }}/inventory/inventory_transform.py"
+        aws s3 cp src/batch/inventory/services/glue_service/inventory_transform.py ${{ secrets.GLUE_SCRIPT_S3_PATH }}/inventory/inventory_transform.py
       env:
         PROJECT_BUCKET: ${{ secrets.PROJECT_BUCKET }}
 
