@@ -87,10 +87,27 @@ jobs:
                 if state_def['Type'] == 'Task' and 'Resource' not in state_def:
                     print(f"Task state '{state_name}' is missing 'Resource' field.")
                     return False
-                # Ensure 'Next' or 'End' is present for non-End states
-                if state_def['Type'] not in ['Succeed', 'Fail'] and 'End' not in state_def and 'Next' not in state_def:
-                    print(f"State '{state_name}' is missing 'Next' or 'End' field.")
-                    return False
+              # --- Your NEW MODIFICATION START (paste here) ---
+              # Choice states define transitions in their 'Choices' and 'Default' fields, not 'Next' or 'End' directly
+              if state_def['Type'] == 'Choice':
+                  if not state_def.get('Choices') and not state_def.get('Default'):
+                      print(f"Choice state '{state_name}' must have 'Choices' or 'Default' field.")
+                      return False
+                  for choice in state_def.get('Choices', []):
+                      if 'Next' not in choice:
+                          print(f"Choice rule in state '{state_name}' is missing 'Next' field.")
+                          return False
+                  if 'Default' in state_def and state_def['Default'] not in definition['States']:
+                      print(f"Default state '{state_def['Default']}' in state '{state_name}' not found in States.")
+                      return False
+              # --- Your NEW MODIFICATION END ---
+
+              # Ensure 'Next' or 'End' is present for other non-terminal state types
+              # IMPORTANT: This 'if' was changed to 'elif'
+              elif state_def['Type'] not in ['Succeed', 'Fail']: # 'Pass', 'Task', 'Wait', 'Parallel' need Next/End
+                  if 'End' not in state_def and 'Next' not in state_def:
+                      print(f"State '{state_name}' of type '{state_def['Type']}' is missing 'Next' or 'End' field.")
+                      return False
             
             print("Step Function definition is valid (basic structural check passed).")
             return True
