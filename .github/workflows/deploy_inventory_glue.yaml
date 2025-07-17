@@ -87,3 +87,62 @@ jobs:
             --description "Python Shell Glue job for inventory validation" \
             --region ${{ secrets.AWS_REGION }}
         fi
+
+
+    - name: Debug - Check glue_transform.py size before upload
+      run: |
+        ls -lh src/batch/inventory/services/glue_service/glue_transform.py
+
+    - name: Upload Glue Transform Script to S3
+      run: |
+        echo "Uploading src/batch/inventory/services/glue_service/glue_transform.py to ${{ secrets.GLUE_SCRIPT_S3_PATH }}/glue_transform.py"
+        aws s3 cp src/batch/inventory/services/glue_service/glue_transform.py ${{ secrets.GLUE_SCRIPT_S3_PATH }}/glue_transform.py
+      env:
+        PROJECT_BUCKET: ${{ secrets.PROJECT_BUCKET }}
+
+    - name: Debug - Check S3 object size after upload
+      run: |
+        aws s3 ls s3://${{ secrets.PROJECT_BUCKET }}/scripts/glue/glue_transform.py
+        aws s3api head-object --bucket ${{ secrets.PROJECT_BUCKET }} --key scripts/glue/glue_transform.py
+
+    - name: Deploy Glue Spark ETL Job
+      run: |
+        JOB_NAME="inventory_transform"  # Your Glue job name
+        SCRIPT_LOCATION="s3://${{ secrets.PROJECT_BUCKET }}/scripts/glue/glue_transform.py"
+        ROLE_ARN="arn:aws:iam::985539772768:role/inventory_glue_role"
+
+        # Check if job exists
+        if aws glue get-job --job-name $JOB_NAME --region ${{ secrets.AWS_REGION }}; then
+          echo "Updating existing Glue Spark ETL job $JOB_NAME"
+          aws glue update-job --job-name $JOB_NAME --job-update '{
+            "Role": "'"$ROLE_ARN"'",
+            "Command": {
+              "Name": "glueetl",
+              "ScriptLocation": "'"$SCRIPT_LOCATION"'",
+              "PythonVersion": "3"
+            },
+            "DefaultArguments": {
+              "--enable-continuous-cloudwatch-log": "true",
+              "--enable-glue-datacatalog": "true",
+              "--job-language": "python"
+            },
+            "MaxRetries": 1,
+            "GlueVersion": "3.0",
+            "MaxCapacity": 2,                             # Adjusted for Spark job
+            "Timeout": 2880,
+            "Description": "Glue Spark ETL job for inventory validation"
+          }' --region ${{ secrets.AWS_REGION }}
+        else
+          echo "Creating Glue Spark ETL job $JOB_NAME"
+          aws glue create-job \
+            --name $JOB_NAME \
+            --role $ROLE_ARN \
+            --command Name=glueetl,ScriptLocation=$SCRIPT_LOCATION,PythonVersion=3 \
+            --default-arguments '{"--enable-continuous-cloudwatch-log":"true","--enable-glue-datacatalog":"true","--job-language":"python"}' \
+            --max-retries 1 \
+            --glue-version 3.0 \
+            --max-capacity 2 \
+            --timeout 2880 \
+            --description "Glue Spark ETL job for inventory validation" \
+            --region ${{ secrets.AWS_REGION }}
+        fi

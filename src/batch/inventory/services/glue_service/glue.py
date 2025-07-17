@@ -353,7 +353,9 @@ def process_single_file(file_info: Dict) -> Tuple[bool, List[str], str]:
             # Write to validated zone as parquet
             write_dataframe_to_s3_parquet(df, S3_INV_VALIDATED_PATH, file_key)
             # Move the original to validated zone as well
-            move_s3_object(file_key, S3_INV_VALIDATED_PATH)
+            # move_s3_object(file_key, S3_INV_VALIDATED_PATH)
+            # Delete the original JSON file from the raw path after successful processing and writing Parquet
+            # s3_client.delete_object(Bucket=PROJECT_BUCKET, Key=file_key)
             return True, [], "SUCCESS"
         else:
             # Move invalid file to rejected zone
@@ -436,6 +438,16 @@ def main():
     report = create_processing_report(
         total_files, success_count, reject_count, error_count, duration
     )
+
+        # Add the processing outcome metrics to the log messages
+    log_messages.append("\n--- Processing Outcome Metrics ---")
+    log_messages.append(f"Total Files Processed: {report['job_execution']['total_files']}")
+    log_messages.append(f"Files Succeeded: {report['job_execution']['successful_files']}")
+    log_messages.append(f"Files Rejected: {report['job_execution']['rejected_files']}")
+    log_messages.append(f"Files Errored: {report['job_execution']['error_files']}")
+    log_messages.append(f"Total Duration: {report['job_execution']['duration_seconds']} seconds")
+
+
     logger.info(json.dumps(report, indent=2))
     write_logs_to_s3(log_messages)
     publish_metrics_to_cloudwatch({
