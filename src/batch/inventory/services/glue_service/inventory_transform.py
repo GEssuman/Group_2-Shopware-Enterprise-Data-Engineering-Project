@@ -37,7 +37,7 @@ logging.basicConfig(
 PROJECT_BUCKET = os.environ.get("PROJECT_BUCKET", "misc-gtp-proj")
 S3_INV_VALIDATED_PATH = f"s3://{PROJECT_BUCKET}/landing_zone/validatedinventory"
 S3_INV_PROCESSED_PATH = f"s3://{PROJECT_BUCKET}/landing_zone/processed/inventory"
-S3_LOG_PATH = f"s3://{PROJECT_BUCKET}/logs/glue/inventory/transform"
+S3_LOG_PATH = f"s3://{PROJECT_BUCKET}/logs/glue/inventory/transform/"
 MAX_RETRY_ATTEMPTS = 3
 
 # Spark Configuration
