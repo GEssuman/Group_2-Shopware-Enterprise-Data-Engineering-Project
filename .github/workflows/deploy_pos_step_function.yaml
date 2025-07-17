@@ -1,0 +1,54 @@
+name: Deploy Step Function
+
+on:
+  push:
+    branches:
+      - dev
+      - feature/stepfunctions
+    paths:
+      - src/batch/pos/services/workflow/pos_step_function.asl.json
+      - .github/workflows/deploy_pos_step_function.yaml
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Deploy Step Function
+        id: deploy
+        run: |
+          STATE_MACHINE_NAME="${{ secrets.POS_STEP_FUNCTION_NAME }}"
+          ROLE_ARN="arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/service-role/StepFunctions-${{ secrets.POS_STEP_FUNCTION_NAME }}-role-cnsrw52fo"
+          DEFINITION_FILE="src/batch/pos/services/workflow/pos_step_function.asl.json"
+
+          echo "Checking if state machine exists..."
+          set +e
+          aws stepfunctions describe-state-machine \
+            --state-machine-arn arn:aws:states:${{ secrets.AWS_REGION }}:${{ secrets.AWS_ACCOUNT_ID }}:stateMachine:$STATE_MACHINE_NAME \
+            > state_machine.json 2>/dev/null
+          STATUS=$?
+          set -e
+
+          if [ $STATUS -eq 0 ]; then
+            echo "State machine exists. Updating..."
+            aws stepfunctions update-state-machine \
+              --state-machine-arn arn:aws:states:${{ secrets.AWS_REGION }}:${{ secrets.AWS_ACCOUNT_ID }}:stateMachine:$STATE_MACHINE_NAME \
+              --definition file://$DEFINITION_FILE
+          else
+            echo "State machine does not exist. Creating..."
+            aws stepfunctions create-state-machine \
+              --name "$STATE_MACHINE_NAME" \
+              --role-arn "$ROLE_ARN" \
+              --definition file://$DEFINITION_FILE \
+              --type STANDARD
+          fi
