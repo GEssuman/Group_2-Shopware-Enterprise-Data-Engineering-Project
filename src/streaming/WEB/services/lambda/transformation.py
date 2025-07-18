@@ -1,220 +1,150 @@
-import json
-import base64
-import logging
-import os
-import boto3
-from botocore.exceptions import ClientError
+import json, base64, boto3, os, logging, uuid
 from datetime import datetime
+from botocore.exceptions import ClientError
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("validation-transformation-lambda")
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
-region = os.getenv("REGION")
-s3_bucket = os.getenv("S3_BUCKET")
-sns_topic_arn = os.getenv("SNS_TOPIC_ARN")  # For failure alerts via SNS
+region = os.environ.get("REGION")
+S3_BUCKET = os.environ.get("S3_BUCKET")
+SNS_TOPIC_ARN = os.environ.get("SNS_TOPIC_ARN")
 
-s3_client = boto3.client("s3", region_name=region)
-sns_client = boto3.client("sns", region_name=region)
-redshift_data = boto3.client("redshift-data", region_name=region)
+s3 = boto3.client("s3", region_name=region)
+sns = boto3.client("sns", region_name=region)
 
-REDSHIFT_CLUSTER_ID = os.getenv("REDSHIFT_CLUSTER_ID")
-REDSHIFT_DB = os.getenv("REDSHIFT_DB")
-REDSHIFT_DB_USER = os.getenv("REDSHIFT_DB_USER")
-REDSHIFT_TABLE = os.getenv("REDSHIFT_TABLE")  # Include schema.table
+REQUIRED_FIELDS = [
+    "session_id", "user_id", "page",
+    "device_type", "browser", "event_type", "timestamp"
+]
 
-def notify_failure_sns(event, error_msg):
-    if not sns_topic_arn:
-        logger.warning("SNS_TOPIC_ARN not set; skipping SNS notification.")
-        return
-    
-    timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
-    message = {
-        "failed_at": timestamp,
-        "error": error_msg,
-        "event": event
-    }
+def is_nonempty(val):
+    if val is None:
+        return False
+    if isinstance(val, str) and val.strip() == "":
+        return False
+    return True
+
+def format_timestamp(ts):
+    """
+    Converts numeric timestamp (float/int) in seconds (or ms) to Redshift-compatible string.
+    """
     try:
-        sns_client.publish(
-            TopicArn=sns_topic_arn,
-            Subject="Validation/Transformation Failure in Lambda",
-            Message=json.dumps(message, default=str),
-        )
-        logger.info(f"Published failure notification to SNS topic {sns_topic_arn}")
+        tsf = float(ts)
+        # If timestamp is in ms, convert to seconds
+        if tsf > 1e11:
+            tsf = tsf / 1000
+        # Format as YYYY-MM-DD HH24:MI:SS
+        return datetime.utcfromtimestamp(tsf).strftime("%Y-%m-%d %H:%M:%S")
     except Exception as e:
-        logger.error(f"Failed to publish SNS notification: {e}")
-
-def save_failed(event, error_msg):
-    timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')
-    session_id = event.get('session_id', 'unknown')
-    key = f"failed_records/{timestamp}_{session_id}.json"
-    payload = {"event": event, "error": error_msg, "failed_at": timestamp}
-    
-    try:
-        s3_client.put_object(
-            Bucket=s3_bucket,
-            Key=key,
-            Body=json.dumps(payload).encode("utf-8"),
-            ContentType="application/json"
-        )
-        logger.info(f"Saved failed event to s3://{s3_bucket}/{key}")
-    except Exception as e:
-        logger.error(f"Failed to save failed event to S3: {e}")
-
-    # Send SNS notification for validation or transformation failure
-    notify_failure_sns(event, error_msg)
-
-def validate_event(event):
-    if "session_id" not in event or not event["session_id"]:
-        raise ValueError("session_id is required")
-    
-    if "timestamp" in event:
-        try:
-            ts = float(event["timestamp"])
-            if ts > 1e11:  # milliseconds
-                ts = ts / 1000
-        except (ValueError, TypeError):
-            raise ValueError("Invalid timestamp format")
-    
-    return event
-
-def transform_event(event):
-    if "timestamp" in event:
-        try:
-            ts_float = float(event["timestamp"])
-            if ts_float > 1e11:
-                ts_float = ts_float / 1000
-            event["event_time"] = datetime.utcfromtimestamp(ts_float).strftime('%Y-%m-%d %H:%M:%S')
-        except Exception:
-            event["event_time"] = None
-        del event["timestamp"]
-
-    event["processed_at"] = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
-    return event
-
-def save_to_redshift_batch(events):
-    if not events:
-        return
-    
-    if len(events) == 1:
-        return save_to_redshift_single(events[0])
-    
-    columns = list(events[0].keys())
-    columns_sql = ', '.join(columns)
-    
-    values_clauses = []
-    for event in events:
-        row_values = []
-        for col in columns:
-            val = event.get(col)
-            if val is None:
-                row_values.append("NULL")
-            else:
-                safe_val = str(val).replace("'", "''")
-                row_values.append(f"'{safe_val}'")
-        values_clauses.append(f"({', '.join(row_values)})")
-    
-    values_sql = ', '.join(values_clauses)
-    sql = f"INSERT INTO {REDSHIFT_TABLE} ({columns_sql}) VALUES {values_sql};"
-    
-    try:
-        redshift_data.execute_statement(
-            ClusterIdentifier=REDSHIFT_CLUSTER_ID,
-            Database=REDSHIFT_DB,
-            DbUser=REDSHIFT_DB_USER,
-            Sql=sql
-        )
-        logger.info(f"Batch inserted {len(events)} records into Redshift")
-    except ClientError as e:
-        logger.error(f"Redshift Data API error on batch insert: {e}")
-        raise
-
-def save_to_redshift_single(event):
-    filtered_event = {k: v for k, v in event.items()}
-    
-    if not filtered_event:
-        logger.warning("No valid data to insert")
-        return
-    
-    columns = list(filtered_event.keys())
-    values = []
-    
-    for col in columns:
-        val = filtered_event[col]
-        if val is None:
-            values.append("NULL")
-        else:
-            safe_val = str(val).replace("'", "''")
-            values.append(f"'{safe_val}'")
-    
-    columns_sql = ', '.join(columns)
-    values_sql = ', '.join(values)
-    sql = f"INSERT INTO {REDSHIFT_TABLE} ({columns_sql}) VALUES ({values_sql});"
-    
-    try:
-        redshift_data.execute_statement(
-            ClusterIdentifier=REDSHIFT_CLUSTER_ID,
-            Database=REDSHIFT_DB,
-            DbUser=REDSHIFT_DB_USER,
-            Sql=sql
-        )
-        logger.info(f"Inserted record for session_id {event.get('session_id')} into Redshift")
-    except ClientError as e:
-        logger.error(f"Redshift Data API error on single insert: {e}")
-        raise
+        logger.warning(f"Could not parse timestamp: {ts} ({e})")
+        return None
 
 def lambda_handler(event, context):
-    try:
-        records = event.get("Records", [])
-        if records:
-            successful_events = []
-            failed_count = 0
-            
-            for record in records:
-                if 'kinesis' in record and 'data' in record['kinesis']:
-                    payload_b64 = record['kinesis']['data']
-                    decoded_bytes = base64.b64decode(payload_b64)
-                    event_data = json.loads(decoded_bytes)
+    valid_events = []
+    anon_counter = 0  #  in-memory counter if you want anon IDs as anon001/anon002
+
+    for record in event.get("Records", []):
+        try:
+            payload = base64.b64decode(record["kinesis"]["data"]).decode("utf-8")
+            event_data = json.loads(payload)
+            logger.info(f"Processing event: {event_data}")
+
+            session_id = event_data.get("session_id")
+            user_id = event_data.get("user_id")
+
+            # If session_id missing/null/empty, route to failed records folder
+            if not is_nonempty(session_id):
+                logger.warning("Missing/empty session_id. Moving event to failed records folder.")
+                fail_info = {
+                    "event": event_data,
+                    "error": "Missing/null/empty session_id",
+                    "failed_at": datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+                }
+                send_to_s3(fail_info, S3_BUCKET, "failed_transformation_records/")
+                notify_failure(fail_info)
+                continue
+
+            # If user_id is missing/blank/null, generate a unique anon ID
+            if not is_nonempty(user_id):
+                anon_id = f"anon{uuid.uuid4().hex[:8]}"
+                logger.info(f"user_id missing/null/empty - generating anon ID [{anon_id}] for analytics consistency.")
+                user_id = anon_id
+
+            # Prepare the cleaned event with formatted timestamp
+            cleaned_event = {k: event_data.get(k) for k in REQUIRED_FIELDS}
+            cleaned_event["user_id"] = user_id  # Overwrite with anon or real
+
+            # Convert timestamp field to string
+            if "timestamp" in cleaned_event and cleaned_event["timestamp"] is not None:
+                formatted_ts = format_timestamp(cleaned_event["timestamp"])
+                if formatted_ts:
+                    cleaned_event["timestamp"] = formatted_ts
                 else:
-                    event_data = record
+                    # If timestamp is unparseable, treat as failure
+                    logger.warning("Malformed timestamp; moving event to failed records folder.")
+                    fail_info = {
+                        "event": event_data,
+                        "error": f"Malformed timestamp: {cleaned_event['timestamp']}",
+                        "failed_at": datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+                    }
+                    send_to_s3(fail_info, S3_BUCKET, "failed_transformation_records/")
+                    notify_failure(fail_info)
+                    continue
 
-                try:
-                    validated = validate_event(event_data)
-                    transformed = transform_event(validated)
-                    successful_events.append(transformed)
-                except Exception as e:
-                    logger.error(f"Error processing record: {e}")
-                    save_failed(event_data, str(e))
-                    failed_count += 1
-            
-            if successful_events:
-                try:
-                    if len(successful_events) <= 5:
-                        for event_data in successful_events:
-                            save_to_redshift_single(event_data)
-                    else:
-                        save_to_redshift_batch(successful_events)
-                except Exception as e:
-                    logger.error(f"Redshift insert failed: {e}")
-                    for event_data in successful_events:
-                        save_failed(event_data, str(e))
-                    failed_count += len(successful_events)
+            valid_events.append(cleaned_event)
 
-            return {
-                "statusCode": 200,
-                "body": json.dumps({
-                    "message": f"Processed {len(records)} records.",
-                    "successful": len(successful_events),
-                    "failed": failed_count
-                })
+        except Exception as e:
+            fail_info = {
+                "error": str(e),
+                "raw": record,
+                "failed_at": datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
             }
-        else:
-            validated = validate_event(event)
-            transformed = transform_event(validated)
-            save_to_redshift_single(transformed)
+            send_to_s3(fail_info, S3_BUCKET, "failed_records/")
+            logger.error(f"Error processing record: {e}")
+            notify_failure(fail_info)
 
-            return {"statusCode": 200, "body": json.dumps({"message": "Processed single event."})}
+    if valid_events:
+        write_ndjson_to_s3(valid_events, S3_BUCKET, "transformed_events/")
 
-    except Exception as e:
-        logger.error(f"Fatal error: {e}")
-        save_failed(event if isinstance(event, dict) else {}, str(e))
-        raise
+def write_ndjson_to_s3(events, bucket, prefix):
+    key = prefix + f"batch_{datetime.utcnow().strftime('%Y%m%dT%H%M%S%f')}.json"
+    ndjson_body = "\n".join(json.dumps(event) for event in events)
+    try:
+        s3.put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=ndjson_body.encode("utf-8")
+        )
+        logger.info(f"Wrote batch of {len(events)} events to s3://{bucket}/{key}")
+    except ClientError as e:
+        logger.error(f"Failed to write batch to S3: {e}")
+        notify_failure({
+            "error": str(e),
+            "batch_key": key,
+            "failed_at": datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+        })
+
+def send_to_s3(data, bucket, prefix):
+    key = prefix + f"event_{datetime.utcnow().strftime('%Y%m%dT%H%M%S%f')}.json"
+    try:
+        s3.put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=json.dumps(data).encode("utf-8")
+        )
+        logger.info(f"Saved single event to s3://{bucket}/{key}")
+    except ClientError as e:
+        logger.error(f"Failed to write to S3: {e}")
+
+def notify_failure(message):
+    if not SNS_TOPIC_ARN:
+        logger.warning("SNS_TOPIC_ARN not set; skipping SNS notification.")
+        return
+    try:
+        sns.publish(
+            TopicArn=SNS_TOPIC_ARN,
+            Subject="Lambda Processing Failure",
+            Message=json.dumps(message, indent=2)
+        )
+    except ClientError as e:
+        logger.error(f"Failed to send SNS notification: {e}")
