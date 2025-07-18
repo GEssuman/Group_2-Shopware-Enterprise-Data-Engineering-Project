@@ -49,6 +49,7 @@ jobs:
                 --arg raw "${{ secrets.BATCH_SOURCE_BUCKET }}" \
                 --arg delta "${{ secrets.BATCH_DELTA_BUCKET }}" \
                 --arg logs "${{ secrets.GLUE_LOGS_S3_PATH }}" \
+                --arg archive "${{ secrets.BATCH_ARCHIVE_BUCKET }}" \
                 '{
                   Role: $role,
                   Command: {
@@ -66,6 +67,7 @@ jobs:
                     "--datalake-formats": "delta",
                     "--POS_S3_BUCKET": $raw,
                     "--POS_DELTA_BUCKET": $delta,
+                    "--ARCHIVE_BUCKET": $archive,
                     "--conf": "spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension --conf spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog"
                   },
                   GlueVersion: "5.0",
@@ -91,6 +93,7 @@ jobs:
                 "--TempDir": "${{ secrets.GLUE_SCRIPT_S3_PATH }}/glue/pos/temp",
                 "--POS_S3_BUCKET": "${{ secrets.BATCH_SOURCE_BUCKET }}",
                 "--POS_DELTA_BUCKET": "${{ secrets.BATCH_DELTA_BUCKET }}",
+                "--ARCHIVE_BUCKET": "${{ secrets.BATCH_ARCHIVE_BUCKET }}",
                 "--conf": "spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension --conf spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog"
               }' \
               --glue-version "5.0" \
