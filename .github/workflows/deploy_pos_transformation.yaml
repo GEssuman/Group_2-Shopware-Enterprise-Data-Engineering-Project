@@ -68,7 +68,7 @@ jobs:
                     "--datalake-formats": "delta",
                     "--POS_S3_BUCKET": $raw,
                     "--ARCHIVE_BUCKET": $archive,
-                    "--ETL_LANDING_S3_BUCKET: $landing_bucket,
+                    "--ETL_LANDING_S3_BUCKET": $landing_bucket,
                     "--conf": "spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension --conf spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog"
                   },
                   GlueVersion: "5.0",
