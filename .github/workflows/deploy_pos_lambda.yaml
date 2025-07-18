@@ -55,7 +55,6 @@ jobs:
             aws lambda update-function-configuration \
               --function-name POSStepFunction_Invoker \
               --environment "Variables={POS_STEP_FUNCTION_ARN=${{ secrets.POS_STEP_FUNCTION_NAME }}}"
-              --handler invoke_step_function.lambda_handler \
           else
             echo "Creating new Lambda function..."
             aws lambda create-function \
