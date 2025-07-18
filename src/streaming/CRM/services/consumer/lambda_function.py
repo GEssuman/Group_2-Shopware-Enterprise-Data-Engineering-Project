@@ -273,3 +273,86 @@ def process_batch(batch, batch_id, failed_records):
             send_to_dlq(record, f"S3 write error for batch {batch_id}", sequence_number)
         return False
     return True
+
+
+def lambda_handler(event, context):
+    """Lambda handler for Kinesis stream events with micro-batch processing."""
+    logger.info(f"Number of records received: {len(event.get('Records', []))}")
+    logger.handlers[0].flush()
+    processed_count = 0
+    failed_count = 0
+    batch = []
+    batch_records = []  # Store (raw_data, sequence_number) for DLQ if batch fails
+
+    for record in event["Records"]:
+        sequence_number = record["kinesis"]["sequenceNumber"]
+        try:
+            try:
+                # Decode base64-encoded Kinesis data and parse JSON
+                data = json.loads(
+                    base64.b64decode(record["kinesis"]["data"]).decode("utf-8")
+                )
+            except (json.JSONDecodeError, UnicodeDecodeError, TypeError) as e:
+                logger.error(f"Invalid data in record {sequence_number}: {str(e)}")
+                logger.handlers[0].flush()
+                send_to_dlq(
+                    record["kinesis"]["data"],
+                    f"Decode error: {str(e)}",
+                    sequence_number,
+                )
+                failed_count += 1
+                continue
+
+            is_valid, error = validate_record(data)
+            if not is_valid:
+                logger.error(f"Validation failed for record {sequence_number}: {error}")
+                logger.handlers[0].flush()
+                send_to_dlq(data, error, sequence_number)
+                failed_count += 1
+                continue
+
+            cleaned_data, error = clean_record(data)
+            if error:
+                logger.error(f"Cleaning failed for record {sequence_number}: {error}")
+                logger.handlers[0].flush()
+                send_to_dlq(data, error, sequence_number)
+                failed_count += 1
+                continue
+
+            batch.append(cleaned_data)
+            batch_records.append((data, sequence_number))
+            if len(batch) >= BATCH_SIZE:
+                batch_id = str(uuid.uuid4())
+                if process_batch(batch, batch_id, batch_records):
+                    processed_count += len(batch)
+                else:
+                    failed_count += len(batch)
+                batch = []
+                batch_records = []
+
+        except Exception as e:
+            logger.error(f"Unexpected error in record {sequence_number}: {str(e)}")
+            logger.handlers[0].flush()
+            send_to_dlq(
+                record["kinesis"]["data"],
+                f"Unexpected error: {str(e)}",
+                sequence_number,
+            )
+            failed_count += 1
+
+    # Process any remaining records in the batch
+    if batch:
+        batch_id = str(uuid.uuid4())
+        if process_batch(batch, batch_id, batch_records):
+            processed_count += len(batch)
+        else:
+            failed_count += len(batch)
+
+    logger.info(f"Processed {processed_count} records, failed {failed_count} records")
+    logger.handlers[0].flush()
+    return {
+        "statusCode": 200,
+        "body": json.dumps(
+            {"processed_count": processed_count, "failed_count": failed_count}
+        ),
+    }
