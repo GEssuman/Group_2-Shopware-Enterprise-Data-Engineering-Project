@@ -49,6 +49,7 @@ jobs:
                 --arg raw "${{ secrets.BATCH_SOURCE_BUCKET }}" \
                 --arg delta "${{ secrets.BATCH_DELTA_BUCKET }}" \
                 --arg logs "${{ secrets.GLUE_LOGS_S3_PATH }}" \
+                --arg landing_bucket "${{ secrets.PROJECT_BUCKET }}" \
                 --arg archive "${{ secrets.BATCH_ARCHIVE_BUCKET }}" \
                 '{
                   Role: $role,
@@ -61,13 +62,13 @@ jobs:
                     "--job-language": "python",
                     "--enable-continuous-cloudwatch-log": "true",
                     "--enable-spark-ui": "true",
-                    "--spark-event-logs-path": ($logs + "/glue/pos/"),
+                    "--spark-event-logs-path": ($logs + "pos/"),
                     "--extra-py-files": "",
-                    "--TempDir": ($logs + "/glue/pos/temp"),
+                    "--TempDir": ($logs + "pos/temp"),
                     "--datalake-formats": "delta",
                     "--POS_S3_BUCKET": $raw,
-                    "--POS_DELTA_BUCKET": $delta,
                     "--ARCHIVE_BUCKET": $archive,
+                    "--ETL_LANDING_S3_BUCKET: $landing_bucket,
                     "--conf": "spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension --conf spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog"
                   },
                   GlueVersion: "5.0",
@@ -92,7 +93,7 @@ jobs:
                 "--datalake-formats": "delta",
                 "--TempDir": "${{ secrets.GLUE_SCRIPT_S3_PATH }}/glue/pos/temp",
                 "--POS_S3_BUCKET": "${{ secrets.BATCH_SOURCE_BUCKET }}",
-                "--POS_DELTA_BUCKET": "${{ secrets.BATCH_DELTA_BUCKET }}",
+                "--ETL_LANDING_S3_BUCKET": "${{ secrets.PROJECT_BUCKET }}",
                 "--ARCHIVE_BUCKET": "${{ secrets.BATCH_ARCHIVE_BUCKET }}",
                 "--conf": "spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension --conf spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog"
               }' \
