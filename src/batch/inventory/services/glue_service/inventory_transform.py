@@ -220,7 +220,7 @@ def upsert_inventory_delta(df: DataFrame, output_path: str, partition_column: st
     """
     Always upsert data using Delta Lake. Repartition only if large batch; otherwise upsert as-is.
     """
-    spark = df.sparkSession
+    spark = df.spark
     batch_size = df.count()  # This triggers computation (expensive but necessary here)
 
     logger.info(f"Batch size: {batch_size}")
@@ -458,7 +458,7 @@ def main():
             delete_error = f"ERROR deleting validated files: {e}"
             logger.error(delete_error)
             log_messages.append(delete_error)
-            
+
 
         df.unpersist()
         df_transformed.unpersist()
