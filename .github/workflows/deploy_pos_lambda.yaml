@@ -49,6 +49,9 @@ jobs:
               --function-name POSStepFunction_Invoker \
               --zip-file fileb://lambda.zip
 
+            aws lambda wait function-updated --function-name POSStepFunction_Invoker --region ${{ secrets.AWS_REGION }}
+
+
             aws lambda update-function-configuration \
               --function-name POSStepFunction_Invoker \
               --environment "Variables={POS_STEP_FUNCTION_ARN=${{ secrets.POS_STEP_FUNCTION_NAME }}}"
