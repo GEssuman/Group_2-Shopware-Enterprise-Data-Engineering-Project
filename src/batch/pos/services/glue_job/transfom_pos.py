@@ -9,6 +9,7 @@ from delta.tables import DeltaTable
 import json
 import boto3
 import logging
+import re
 
 #  Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s]: %(message)s")
@@ -53,11 +54,14 @@ def read_csv_files(path):
 
 def archive_all_csv_files(source_bucket, prefix, archive_bucket):
     """
-    Archive all CSV files under a given prefix in an S3 bucket.
+    Archive all CSV files under a given prefix in an S3 bucket,
+    partitioned by date extracted from the filename: pos_YYYYMMDD_HHMMSS.csv
 
-    :param bucket_name: str, e.g., "ecommerce-raw.amalitech-gke"
-    :param prefix: str, e.g., "orders/" or "products/"
-    :param archive_prefix: str, archive base folder (defaults to 'archive/')
+    Destination format: archive/YYYY/MM/DD/filename.csv
+
+    :param source_bucket: str, e.g., "ecommerce-raw.amalitech-gke"
+    :param prefix: str, e.g., "pos/"
+    :param archive_bucket: str, destination bucket for archived files
     """
     logging.info(f"Archiving files in bucket: {source_bucket}, prefix: {prefix}")
     s3 = boto3.client("s3")
@@ -71,9 +75,18 @@ def archive_all_csv_files(source_bucket, prefix, archive_bucket):
         for obj in response["Contents"]:
             key = obj["Key"]
             if key.endswith(".csv"):
-                dest_key = prefix + key
+                filename = key.split("/")[-1]
+                match = re.search(r"pos_(\d{4})(\d{2})(\d{2})_\d{6}\.csv", filename)
+
+                if not match:
+                    logging.warning(f"Skipping file with unexpected format: {filename}")
+                    continue
+
+                year, month, day = match.group(1), match.group(2), match.group(3)
+                dest_key = f"{prefix}{year}/{month}/{day}/{filename}"
+
                 logging.info(f"Archiving {key} → {dest_key}")
-                
+
                 # Copy to archive
                 s3.copy_object(
                     Bucket=archive_bucket,
@@ -81,10 +94,16 @@ def archive_all_csv_files(source_bucket, prefix, archive_bucket):
                     Key=dest_key
                 )
 
-                # Delete original
+                # # Delete original
                 s3.delete_object(Bucket=source_bucket, Key=key)
 
         logging.info(f"All CSV files under '{prefix}' archived successfully.")
+        # Optional: Recreate folder marker to retain the prefix as a visible folder
+        try:
+            s3.put_object(Bucket=source_bucket, Key=f"{prefix}")
+            logging.info(f"Folder marker recreated: {prefix}")
+        except Exception as e:
+            logging.warning(f"Failed to recreate folder marker for {prefix}: {e}")
 
     except Exception as e:
         logging.error(f"Failed to archive files under {prefix}: {e}")
@@ -101,7 +120,7 @@ def main():
             .mode("append") \
             .save(delta_path)
     
-    archive_all_csv_files(source_bucket, "pos", archive_bucket)
+    archive_all_csv_files(source_bucket, "pos/", archive_bucket)
 
 if __name__ == "__main__":
     main()
