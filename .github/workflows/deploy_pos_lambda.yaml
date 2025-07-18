@@ -35,6 +35,12 @@ jobs:
           cd package
           zip -r ../lambda.zip .
 
+       # Wait for Lambda to be ready before update
+      - name: Wait for Lambda to be ready before update
+        run: |
+          aws lambda wait function-updated --function-name POSStepFunction_Invoker --region ${{ secrets.AWS_REGION }}
+
+
       - name: Deploy or Update Lambda Function
         run: |
           if aws lambda get-function --function-name POSStepFunction_Invoker 2>/dev/null; then
@@ -46,6 +52,7 @@ jobs:
             aws lambda update-function-configuration \
               --function-name POSStepFunction_Invoker \
               --environment "Variables={POS_STEP_FUNCTION_ARN=${{ secrets.POS_STEP_FUNCTION_NAME }}}"
+              --handler invoke_step_function.lambda_handler \
           else
             echo "Creating new Lambda function..."
             aws lambda create-function \
