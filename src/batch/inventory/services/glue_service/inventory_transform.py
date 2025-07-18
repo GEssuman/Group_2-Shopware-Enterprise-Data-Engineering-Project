@@ -220,7 +220,15 @@ def upsert_inventory_delta(df: DataFrame, output_path: str, partition_column: st
     """
     Always upsert data using Delta Lake. Repartition only if large batch; otherwise upsert as-is.
     """
-    spark = df.spark
+    try:
+        spark = df.sparkSession
+    except AttributeError:
+        # fallback if attribute does not exist
+        try:
+            spark = df.sql_ctx.sparkSession
+        except AttributeError:
+            spark = SparkSession.builder.getOrCreate()
+
     batch_size = df.count()  # This triggers computation (expensive but necessary here)
 
     logger.info(f"Batch size: {batch_size}")
