@@ -46,7 +46,7 @@ STREAM_NAME = os.environ["STREAM_NAME"]
 BUCKET = os.environ["BUCKET"]
 DLQ_URL = os.environ["DLQ_URL"]
 ATHENA_WORKGROUP = os.environ["ATHENA_WORKGROUP"]
-ATHENA_DATABASE = os.environ["ATHENA_DATABASE"]
+ATHENA_DATABASE = os.environ["ATHENA_TABLE"]
 ATHENA_TABLE = os.environ["ATHENA_TABLE"]
 
 # AWS Clients
