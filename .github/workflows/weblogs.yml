@@ -6,12 +6,12 @@ on:
       - 'src/streaming/WEB/services/scripts/**'
       - 'src/streaming/WEB/services/docker/**'
       - 'src/streaming/WEB/services/ecs/**'
+      - 'src/streaming/WEB/services/lambda/**'
       - '.github/workflows/weblogs.yml'
     branches:
       - feature/weblogs
 
 env:
-  # API image repository
   ECR_REPOSITORY_API: weblogs/api-gtp
 
 jobs:
@@ -107,3 +107,68 @@ jobs:
             --task-definition "$TASK_DEF_ARN_API" \
             --force-new-deployment \
             --network-configuration "awsvpcConfiguration={subnets=[subnet-0a3d6890884fa19d2,subnet-0e77aaa29a6fe5946],securityGroups=[sg-0d23674697d6a5c88],assignPublicIp=DISABLED}"
+
+  deploy-lambdas:
+    runs-on: ubuntu-latest
+    needs: build-and-push-ecr
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install boto3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Deploy transformation Lambda
+        run: |
+          FUNCTION_NAME="weblogs-lambda"
+          ZIP_FILE="transformation.zip"
+          zip -j $ZIP_FILE src/streaming/WEB/services/lambda/transformation.py
+
+          if aws lambda get-function --function-name $FUNCTION_NAME > /dev/null 2>&1; then
+            echo "Updating existing function $FUNCTION_NAME"
+            aws lambda update-function-code \
+              --function-name $FUNCTION_NAME \
+              --zip-file fileb://$ZIP_FILE
+          else
+            echo "Creating new function $FUNCTION_NAME"
+            aws lambda create-function \
+              --function-name $FUNCTION_NAME \
+              --runtime python3.10 \
+              --role arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/weblogs-lambda-role-1awjd0og \
+              --handler transformation.lambda_handler \
+              --zip-file fileb://$ZIP_FILE
+          fi
+
+      - name: Deploy s3toredshift Lambda
+        run: |
+          FUNCTION_NAME="weblogs-toredshift"
+          ZIP_FILE="s3toredshift.zip"
+          zip -j $ZIP_FILE src/streaming/WEB/services/lambda/s3toredshift.py
+
+          if aws lambda get-function --function-name $FUNCTION_NAME > /dev/null 2>&1; then
+            echo "Updating existing function $FUNCTION_NAME"
+            aws lambda update-function-code \
+              --function-name $FUNCTION_NAME \
+              --zip-file fileb://$ZIP_FILE
+          else
+            echo "Creating new function $FUNCTION_NAME"
+            aws lambda create-function \
+              --function-name $FUNCTION_NAME \
+              --runtime python3.10 \
+              --role arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:weblogs-lambda-role-1awjd0og \
+              --handler lambda_function.lambda_handler \
+              --zip-file fileb://$ZIP_FILE
+          fi
