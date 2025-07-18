@@ -19,9 +19,9 @@ spark = glueContext.spark_session
 
 
 # Get job arguments
-args = getResolvedOptions(sys.argv, ['JOB_NAME', 'POS_S3_BUCKET', 'POS_DELTA_BUCKET','ARCHIVE_BUCKET'])
-delta_path = f"s3://{args['ETL_LANDING_S3_BUCKET']}landing_zone/processed/pos"
-archive_bucket = args['ARCHIVE_BUCET']
+args = getResolvedOptions(sys.argv, ['JOB_NAME', 'POS_S3_BUCKET', 'ETL_LANDING_S3_BUCKET','ARCHIVE_BUCKET'])
+delta_path = f"s3://{args['ETL_LANDING_S3_BUCKET']}/landing_zone/processed/pos"
+archive_bucket = args['ARCHIVE_BUCKET']
 source_bucket = args['POS_S3_BUCKET']
 s3_input_path = f"s3://{source_bucket}/pos"
 
