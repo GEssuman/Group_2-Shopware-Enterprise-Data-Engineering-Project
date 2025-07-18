@@ -247,6 +247,55 @@ def upsert_inventory_delta(df: DataFrame, output_path: str, partition_column: st
         logger.info("Delta table did not exist. Created new with initial data.")
 
 
+def delete_s3_files(s3_path: str, log_messages: Optional[list] = None) -> None:
+    """
+    Deletes all objects under the specified S3 path.
+    Args:
+        s3_path: The S3 path from which to delete files (e.g., s3://bucket/prefix/)
+        log_messages: List to append log info/warnings to.
+    """
+    s3_client = create_s3_client()
+    try:
+        bucket_name, prefix = s3_path.replace("s3://", "").split("/", 1)
+        paginator = s3_client.get_paginator('list_objects_v2')
+        deleted_count = 0
+        
+        # Collect all object keys to delete
+        objects_to_delete = []
+        for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
+            if "Contents" in page:
+                for obj in page["Contents"]:
+                    objects_to_delete.append({"Key": obj["Key"]})
+
+        if not objects_to_delete:
+            msg = f"No files found to delete in {s3_path}"
+            logger.info(msg)
+            if log_messages is not None:
+                log_messages.append(msg)
+            return
+
+        # Delete in batches of 1000 (S3 API limit)
+        for i in range(0, len(objects_to_delete), 1000):
+            batch = objects_to_delete[i:i + 1000]
+            s3_client.delete_objects(
+                Bucket=bucket_name,
+                Delete={"Objects": batch, "Quiet": True} # Quiet=True means no error for non-existent objects
+            )
+            deleted_count += len(batch)
+            
+        msg = f"Successfully deleted {deleted_count} files from {s3_path}"
+        logger.info(msg)
+        if log_messages is not None:
+            log_messages.append(msg)
+
+    except Exception as e:
+        error_msg = f"Failed to delete files from {s3_path}: {e}"
+        logger.error(error_msg)
+        if log_messages is not None:
+            log_messages.append(f"ERROR: {error_msg}")
+
+
+
 
 def archive_s3_inventory_files(src_path: str, dest_path: str, log_messages: Optional[list] = None) -> None:
     """
@@ -275,7 +324,7 @@ def archive_s3_inventory_files(src_path: str, dest_path: str, log_messages: Opti
                         ServerSideEncryption="AES256"
                     )
                     # Delete original
-                    #s3_client.delete_object(Bucket=src_bucket, Key=src_key)
+                    s3_client.delete_object(Bucket=src_bucket, Key=src_key)
                     moved_files += 1
         msg = f"Archived {moved_files} raw files from {src_path} to {dest_path}"
         logger.info(msg)
@@ -399,6 +448,17 @@ def main():
             archive_error = f"ERROR archiving raw files: {e}"
             logger.error(archive_error)
             log_messages.append(archive_error)
+        
+
+        # DELETE VALIDATED FILES after successful processing and raw archiving
+        try:
+            log_messages.append(f"Deleting validated files from {S3_INV_VALIDATED_PATH}")
+            delete_s3_files(S3_INV_VALIDATED_PATH, log_messages)
+        except Exception as e:
+            delete_error = f"ERROR deleting validated files: {e}"
+            logger.error(delete_error)
+            log_messages.append(delete_error)
+            
 
         df.unpersist()
         df_transformed.unpersist()

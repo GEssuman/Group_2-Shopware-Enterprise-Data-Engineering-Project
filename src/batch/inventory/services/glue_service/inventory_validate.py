@@ -355,7 +355,7 @@ def process_single_file(file_info: Dict) -> Tuple[bool, List[str], str]:
             # Move the original to validated zone as well
             # move_s3_object(file_key, S3_INV_VALIDATED_PATH)
             # Delete the original JSON file from the raw path after successful processing and writing Parquet
-            # s3_client.delete_object(Bucket=PROJECT_BUCKET, Key=file_key)
+            #s3_client.delete_object(Bucket=PROJECT_BUCKET, Key=file_key)
             return True, [], "SUCCESS"
         else:
             # Move invalid file to rejected zone
