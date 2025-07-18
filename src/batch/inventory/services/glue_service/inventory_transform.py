@@ -2,7 +2,7 @@ import sys
 import os
 from typing import List, Optional
 from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql.functions import col, to_timestamp, current_timestamp, lit
+from pyspark.sql.functions import col, to_timestamp, current_timestamp, lit, from_unixtime, to_date
 from pyspark.sql.types import (
     StructType,
     StructField,
@@ -38,6 +38,8 @@ PROJECT_BUCKET = os.environ.get("PROJECT_BUCKET", "misc-gtp-proj")
 S3_INV_VALIDATED_PATH = f"s3://{PROJECT_BUCKET}/landing_zone/validated/inventory"
 S3_INV_PROCESSED_PATH = f"s3://{PROJECT_BUCKET}/landing_zone/processed/inventory"
 S3_LOG_PATH = f"s3://{PROJECT_BUCKET}/logs/glue/inventory/transform/"
+RAW_SOURCE_PATH = "s3://misc-gtp-proj/landing_zone/raw/inventory/"
+ARCHIVE_DEST_PATH = "s3://batch-archive-grp2/inventory/"
 MAX_RETRY_ATTEMPTS = 3
 
 # Spark Configuration
@@ -211,131 +213,207 @@ def handle_delta_table_creation(df: DataFrame, output_path: str, partition_colum
         logger.error(f"Failed to write to Delta table: {e}")
         raise
 
+
+
+
+def upsert_inventory_delta(df: DataFrame, output_path: str, partition_column: str, merge_key: str = "inventory_id") -> None:
+    """
+    Always upsert data using Delta Lake. Repartition only if large batch; otherwise upsert as-is.
+    """
+    spark = df.sparkSession
+    batch_size = df.count()  # This triggers computation (expensive but necessary here)
+
+    logger.info(f"Batch size: {batch_size}")
+
+    # Only repartition if the batch is large
+    if batch_size > 10_000_000 and df.rdd.getNumPartitions() < 200:
+        logger.info("Large batch detected. Repartitioning to 200 partitions for parallel upsert.")
+        df = df.repartition(200)
+    # For small batches, use as-is (no explicit coalesce or repartition)
+
+    if DeltaTable.isDeltaTable(spark, output_path):
+        delta_table = DeltaTable.forPath(spark, output_path)
+        merge_condition = f"target.{merge_key} = source.{merge_key}"
+
+        delta_table.alias("target").merge(
+            df.alias("source"),
+            merge_condition
+        ).whenMatchedUpdateAll() \
+         .whenNotMatchedInsertAll() \
+         .execute()
+        logger.info("Upsert (merge) into existing Delta table complete.")
+    else:
+        df.write.format("delta").partitionBy(partition_column).mode("overwrite").save(output_path)
+        logger.info("Delta table did not exist. Created new with initial data.")
+
+
+
+def archive_s3_inventory_files(src_path: str, dest_path: str, log_messages: Optional[list] = None) -> None:
+    """
+    Moves all S3 objects from src_path to dest_path.
+    src_path: full S3 prefix (e.g., s3://misc-gtp-proj/landing_zone/raw/inventory/)
+    dest_path: full S3 prefix (e.g., s3://batch-archive-grp2/inventory/)
+    """
+    s3_client = create_s3_client()
+    try:
+        src_bucket, src_prefix = src_path.replace("s3://", "").split("/", 1)
+        dest_bucket, dest_prefix = dest_path.replace("s3://", "").split("/", 1)
+        paginator = s3_client.get_paginator('list_objects_v2')
+        moved_files = 0
+
+        for page in paginator.paginate(Bucket=src_bucket, Prefix=src_prefix):
+            for obj in page.get("Contents", []):
+                src_key = obj["Key"]
+                if not src_key.endswith('/'):  # skip folders
+                    rel_key = src_key[len(src_prefix):].lstrip("/")
+                    dest_key = f"{dest_prefix.rstrip('/')}/{rel_key}"
+                    # Copy
+                    s3_client.copy_object(
+                        Bucket=dest_bucket,
+                        CopySource={'Bucket': src_bucket, 'Key': src_key},
+                        Key=dest_key,
+                        ServerSideEncryption="AES256"
+                    )
+                    # Delete original
+                    #s3_client.delete_object(Bucket=src_bucket, Key=src_key)
+                    moved_files += 1
+        msg = f"Archived {moved_files} raw files from {src_path} to {dest_path}"
+        logger.info(msg)
+        if log_messages is not None:
+            log_messages.append(msg)
+    except Exception as e:
+        error_msg = f"Failed to archive raw inventory files from {src_path} to {dest_path}: {e}"
+        logger.error(error_msg)
+        if log_messages is not None:
+            log_messages.append(f"ERROR: {error_msg}")
+
+
+
 # -----------------------------------------------------------------------------
 # 3. Main Transformation Logic
 # -----------------------------------------------------------------------------
 
+
 def transform_inventory_data(df: DataFrame) -> DataFrame:
     """
-    Apply business transformations to inventory data.
-    
-    Args:
-        df: Input DataFrame
-        
-    Returns:
-        Transformed DataFrame
+    Transform inventory data with type conversions and derived fields.
     """
     try:
-        # Add ingestion timestamp
-        df_transformed = df.withColumn("ingestion_date", current_timestamp().cast("date"))
-        df_transformed = df_transformed.withColumn("ingestion_timestamp", current_timestamp())
-        
-        # Add data quality indicators
-        df_transformed = df_transformed.withColumn("record_processed_at", lit(datetime.utcnow().isoformat()))
-        
-        # Cache for performance if data will be used multiple times
-        df_transformed.cache()
-        
-        return df_transformed
-        
+        df_typed = (
+            df
+            .withColumn("inventory_id", col("inventory_id").cast(IntegerType()))
+            .withColumn("product_id", col("product_id").cast(IntegerType()))
+            .withColumn("warehouse_id", col("warehouse_id").cast(IntegerType()))
+            .withColumn("stock_level", col("stock_level").cast(IntegerType()))
+            .withColumn("restock_threshold", col("restock_threshold").cast(IntegerType()))
+            .withColumn("last_updated", col("last_updated").cast(FloatType()))
+            .withColumn(
+                "last_updated_datetime",
+                from_unixtime(col("last_updated")).cast(TimestampType())
+            )
+            .withColumn(
+                "last_updated_date",
+                to_date(from_unixtime(col("last_updated")))
+            )
+        )
+        df_typed.cache()
+        return df_typed
     except Exception as e:
         logger.error(f"Error during data transformation: {e}")
         raise
 
+
 def main():
     """
-    The main function for the Spark job with enhanced error handling and logging.
+    Main function for the inventory transformation Spark job:
+    - Validates input
+    - Reads batch data
+    - Transforms and enforces data types
+    - Dynamically optimizes write to Delta Lake partitioned by last_updated_date
     """
     spark = None
     log_messages = []
     job_name = "inventory_transformation"
     start_time = datetime.utcnow()
-    
+
     try:
-        # Initialize Spark session
         spark = create_spark_session("InventoryTransformation")
         log_messages.append(f"Starting job: {job_name} at {start_time.isoformat()}")
         log_messages.append(f"Spark version: {spark.version}")
-        
+
         # Validate input path
         if not validate_s3_path(S3_INV_VALIDATED_PATH):
             message = f"Input path does not exist or is empty: {S3_INV_VALIDATED_PATH}"
             logger.warning(message)
             log_messages.append(message)
             return
-        
+
         # Read validated data from S3
         log_messages.append(f"Reading data from: {S3_INV_VALIDATED_PATH}")
-        
         try:
             df = spark.read.format("parquet").load(S3_INV_VALIDATED_PATH)
-            
-            # Validate DataFrame is not empty
+
             if df.rdd.isEmpty():
                 message = "No data found in source path"
                 logger.warning(message)
                 log_messages.append(message)
                 return
-            
         except Exception as e:
             error_msg = f"Failed to read data from {S3_INV_VALIDATED_PATH}: {str(e)}"
             logger.error(error_msg)
             log_messages.append(f"ERROR: {error_msg}")
             raise
-        
-        # Get record count with caching for performance
+
         df.cache()
         record_count = df.count()
         log_messages.append(f"Successfully read {record_count} records.")
-        
+
         if record_count == 0:
             log_messages.append("No new data to process. Exiting job.")
             return
-        
-        # Log schema information
+
         log_messages.append(f"DataFrame schema: {df.schema.simpleString()}")
-        
-        # Transform the data
+
+        # ---- START Transform ----
         log_messages.append("Starting data transformation...")
+        # transform_inventory_data must enforce type conversion and add last_updated_date!
         df_transformed = transform_inventory_data(df)
-        
-        # Validate transformed data
+        # ---- END Transform ----
+
         transformed_count = df_transformed.count()
         log_messages.append(f"Transformation complete. Record count: {transformed_count}")
-        
+
         if transformed_count != record_count:
             logger.warning(f"Record count mismatch: input={record_count}, transformed={transformed_count}")
-        
-        # Write to Delta Lake
+
+        # ---- Writing ----
         log_messages.append(f"Writing transformed data to Delta Lake at: {S3_INV_PROCESSED_PATH}")
+        upsert_inventory_delta(df_transformed, S3_INV_PROCESSED_PATH, "last_updated_date", "inventory_id")
         
-        # Optimize write operations
-        df_transformed.coalesce(1).write.format("delta").mode("append").partitionBy("ingestion_date").save(S3_INV_PROCESSED_PATH)
         
-        log_messages.append("Data successfully written to Delta Lake.")
-        
-        # Cleanup cached DataFrames
+        # ARCHIVE RAW FILES after upsert  
+        try:
+            log_messages.append(f"Archiving raw inventory files from {RAW_SOURCE_PATH} to {ARCHIVE_DEST_PATH}")
+            archive_s3_inventory_files(RAW_SOURCE_PATH, ARCHIVE_DEST_PATH, log_messages)
+        except Exception as e:
+            archive_error = f"ERROR archiving raw files: {e}"
+            logger.error(archive_error)
+            log_messages.append(archive_error)
+
         df.unpersist()
         df_transformed.unpersist()
-        
+
     except Exception as e:
         error_message = f"An error occurred during job execution: {str(e)}"
         logger.error(error_message, exc_info=True)
         log_messages.append(f"ERROR: {error_message}")
-        
-        # Re-raise the exception to ensure job fails
         raise
-        
+
     finally:
-        # Final log entry and cleanup
         end_time = datetime.utcnow()
         duration = end_time - start_time
         log_messages.append(f"Job finished at {end_time.isoformat()}. Total duration: {duration}")
-        
-        # Write logs to S3
         write_logs_to_s3(log_messages, job_name)
-        
-        # Stop Spark session
         if spark:
             spark.stop()
             logger.info("Spark session stopped successfully")
