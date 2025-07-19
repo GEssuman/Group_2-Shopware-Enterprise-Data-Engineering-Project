@@ -152,11 +152,11 @@ jobs:
               --zip-file fileb://$ZIP_FILE
           fi
 
-      - name: Deploy s3toredshift Lambda
+      - name: Deploy s3toathena Lambda
         run: |
           FUNCTION_NAME="weblogs-toredshift"
-          ZIP_FILE="s3toredshift.zip"
-          zip -j $ZIP_FILE src/streaming/WEB/services/lambda/s3toredshift.py
+          ZIP_FILE="s3toathena.zip"
+          zip -j $ZIP_FILE src/streaming/WEB/services/lambda/s3toathena.py
 
           if aws lambda get-function --function-name $FUNCTION_NAME > /dev/null 2>&1; then
             echo "Updating existing function $FUNCTION_NAME"
