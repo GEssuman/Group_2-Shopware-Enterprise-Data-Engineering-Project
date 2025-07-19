@@ -674,7 +674,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         logger.info(log_message)
         write_log_to_s3(log_message, 'INFO')
         
-        file_movement_results = move_files_according_to_state_and_event(correlation_id)
+        file_movement_results = move_files_according_to_state_and_event(correlation_id, event)
         
         # Log file movement summary
         log_message = f"[{correlation_id}] File movement completed - {file_movement_results.get('successful_moves', 0)} successful, {file_movement_results.get('failed_moves', 0)} failed"
