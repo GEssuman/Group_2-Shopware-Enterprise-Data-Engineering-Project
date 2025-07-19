@@ -176,4 +176,5 @@ pyrightconfig.json
 # End of https://www.toptal.com/developers/gitignore/api/python
 
 
-grp_proj_env/
+grp_proj_env/.DS_Store
+.DS_Store
