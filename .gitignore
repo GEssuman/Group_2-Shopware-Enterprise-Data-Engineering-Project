@@ -178,3 +178,11 @@ pyrightconfig.json
 
 grp_proj_env/.DS_Store
 .DS_Store
+grp_proj_env/
+src/streaming/CRM/services/consumer/consumer4ecs.py
+src/streaming/CRM/services/consumer/Dockerfile
+src/streaming/CRM/services/consumer/requirements.txt
+src/streaming/CRM/services/consumer/task-definition.json
+add_gitkeep.py
+
+.gitignore
