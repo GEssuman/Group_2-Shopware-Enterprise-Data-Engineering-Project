@@ -1,8 +1,8 @@
 import sys
 import os
 from typing import List, Optional
-from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql.functions import col, to_timestamp, current_timestamp, lit, from_unixtime, to_date
+from pyspark.sql import SparkSession, DataFrame, Window
+from pyspark.sql.functions import col, to_timestamp, current_timestamp, lit, from_unixtime, to_date, row_number, desc
 from pyspark.sql.types import (
     StructType,
     StructField,
@@ -218,41 +218,77 @@ def handle_delta_table_creation(df: DataFrame, output_path: str, partition_colum
 
 def upsert_inventory_delta(df: DataFrame, output_path: str, partition_column: str, merge_key: str = "inventory_id") -> None:
     """
-    Always upsert data using Delta Lake. Repartition only if large batch; otherwise upsert as-is.
+    Upsert data into a Delta Lake table. Handles large batches by repartitioning 
+    and creates the table if it does not exist.
+
+    Args:
+        df: The Spark DataFrame to upsert.
+        output_path: Path to the Delta Lake table (e.g., S3 path).
+        partition_column: Column to partition the new Delta table by.
+        merge_key: Column name used as the unique key for merge operations.
     """
+
+    # Attempt to retrieve SparkSession from the DataFrame,
+    # fallback to builder if unavailable.
     try:
         spark = df.sparkSession
     except AttributeError:
-        # fallback if attribute does not exist
         try:
             spark = df.sql_ctx.sparkSession
         except AttributeError:
             spark = SparkSession.builder.getOrCreate()
 
-    batch_size = df.count()  # This triggers computation (expensive but necessary here)
+    # Compute the batch size by counting rows.
+    # This action triggers Spark computation and can be expensive.
+    try:
+        batch_size = df.count()
+        logger.info(f"Batch size: {batch_size}")
+    except Exception as e:
+        logger.error(f"Failed to count DataFrame rows: {e}")
+        # Reraise to stop processing as batch size is critical
+        raise
 
-    logger.info(f"Batch size: {batch_size}")
+    # Repartition the DataFrame for better parallelism on very large batches,
+    # but only if current partition count is low.
+    # Catch and log exceptions here to avoid failure on this non-critical step.
+    try:
+        if batch_size > 10_000_000 and df.rdd.getNumPartitions() < 200:
+            logger.info("Large batch detected. Repartitioning to 200 partitions for parallel upsert.")
+            df = df.repartition(200)
+    except Exception as e:
+        logger.warning(f"Failed to repartition DataFrame: {e}")
+        # Continue with original DataFrame even if repartition fails
 
-    # Only repartition if the batch is large
-    if batch_size > 10_000_000 and df.rdd.getNumPartitions() < 200:
-        logger.info("Large batch detected. Repartitioning to 200 partitions for parallel upsert.")
-        df = df.repartition(200)
-    # For small batches, use as-is (no explicit coalesce or repartition)
+    # Main upsert logic exception handling:
+    try:
+        # Check if Delta table exists at the given path
+        if DeltaTable.isDeltaTable(spark, output_path):
+            delta_table = DeltaTable.forPath(spark, output_path)
+            merge_condition = f"target.{merge_key} = source.{merge_key}"
 
-    if DeltaTable.isDeltaTable(spark, output_path):
-        delta_table = DeltaTable.forPath(spark, output_path)
-        merge_condition = f"target.{merge_key} = source.{merge_key}"
+            # Perform an upsert (merge) from source DataFrame into Delta table
+            delta_table.alias("target").merge(
+                df.alias("source"),
+                merge_condition
+            ).whenMatchedUpdateAll() \
+             .whenNotMatchedInsertAll() \
+             .execute()
 
-        delta_table.alias("target").merge(
-            df.alias("source"),
-            merge_condition
-        ).whenMatchedUpdateAll() \
-         .whenNotMatchedInsertAll() \
-         .execute()
-        logger.info("Upsert (merge) into existing Delta table complete.")
-    else:
-        df.write.format("delta").partitionBy(partition_column).mode("overwrite").save(output_path)
-        logger.info("Delta table did not exist. Created new with initial data.")
+            logger.info("Upsert (merge) into existing Delta table complete.")
+        else:
+            # Delta table does not exist—create new one with partitioning and overwrite mode
+            df.write.format("delta") \
+                .partitionBy(partition_column) \
+                .mode("overwrite") \
+                .save(output_path)
+
+            logger.info("Delta table did not exist. Created new with initial data.")
+
+    except Exception as e:
+        # Catch any errors from merge or write operations and log them
+        logger.error(f"Error during Delta Lake upsert/write operation: {e}")
+        # Reraise exception so caller is aware operation failed
+        raise
 
 
 def delete_s3_files(s3_path: str, log_messages: Optional[list] = None) -> None:
@@ -444,8 +480,22 @@ def main():
             logger.warning(f"Record count mismatch: input={record_count}, transformed={transformed_count}")
 
         # ---- Writing ----
+        w = Window.partitionBy("inventory_id").orderBy(desc("last_updated"))
+        df_unique = df_transformed.withColumn("rank", row_number().over(w)).filter(col("rank") == 1).drop("rank")
+        
+        duplicate_inventory_ids = (
+            df_transformed.groupBy('inventory_id')
+            .count()
+            .filter('count > 1')
+            .select('inventory_id')
+            .rdd.flatMap(lambda x: x)
+            .collect()
+        )
+        if duplicate_inventory_ids:
+            logger.warning(f"Found duplicate inventory_ids in batch: {duplicate_inventory_ids[:10]}")
+
         log_messages.append(f"Writing transformed data to Delta Lake at: {S3_INV_PROCESSED_PATH}")
-        upsert_inventory_delta(df_transformed, S3_INV_PROCESSED_PATH, "last_updated_date", "inventory_id")
+        upsert_inventory_delta(df_unique, S3_INV_PROCESSED_PATH, "last_updated_date", "inventory_id")
         
         
         # ARCHIVE RAW FILES after upsert  
