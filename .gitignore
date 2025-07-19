@@ -189,3 +189,5 @@ src/streaming/CRM/services/consumer/lambda_function_copy.py
 add_gitkeep.py
 
 .gitignore
+grp_proj_env/.DS_Store
+.DS_Store
