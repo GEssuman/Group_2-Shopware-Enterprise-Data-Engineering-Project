@@ -7,7 +7,7 @@ from botocore.exceptions import ClientError, BotoCoreError
 from typing import Dict, List, Any, Optional, Tuple
 import uuid
 from urllib.parse import urlparse
-
+import botocore
 # Set up logging with structured format
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -30,6 +30,10 @@ LOG_FILE_PREFIX = os.environ.get('LOG_FILE_PREFIX')
 BATCH_SOURCE_BUCKET = os.environ.get('BATCH_SOURCE_BUCKET', 'batch-data-source-v1')
 INVENTORY_SOURCE_PREFIX = os.environ.get('INVENTORY_SOURCE_PREFIX', 'inventory/')
 S3_RAW_PATH = f"s3://{S3_BUCKET}/landing_zone/raw"
+
+
+STATE_FILE_BUCKET = 'misc-gtp-proj'
+STATE_FILE_KEY = 'state/inventory/state.json'
 
 MAX_BATCH_SIZE = 100
 MAX_RETRIES = 3
@@ -91,6 +95,28 @@ def write_log_to_s3(log_message: str, log_level: str = 'INFO') -> bool:
     except Exception as e:
         logger.error(f"Unexpected error writing log to S3: {str(e)}")
         return False
+    
+
+
+def state_file_exists() -> bool:
+    try:
+        s3_client.head_object(Bucket=STATE_FILE_BUCKET, Key=STATE_FILE_KEY)
+        return True
+    except botocore.exceptions.ClientError as e:
+        if e.response['Error']['Code'] == '404':
+            return False
+        else:
+            raise
+
+def write_state_file(state_data: Dict[str, Any]) -> None:
+    s3_client.put_object(
+        Bucket=STATE_FILE_BUCKET,
+        Key=STATE_FILE_KEY,
+        Body=json.dumps(state_data).encode('utf-8'),
+        ContentType='application/json',
+        ServerSideEncryption='AES256'
+    )
+
 
 def list_inventory_files(correlation_id: str, prefix: str = None) -> List[Dict[str, Any]]:
     """
@@ -144,6 +170,84 @@ def list_inventory_files(correlation_id: str, prefix: str = None) -> List[Dict[s
         logger.error(log_message)
         write_log_to_s3(log_message, 'ERROR')
         raise e
+
+
+def extract_s3_keys_from_event(event: Dict[str, Any]) -> List[str]:
+    keys = []
+    for record in event.get('Records', []):
+        body = record.get('body')
+        if body:
+            try:
+                message = json.loads(body)
+                for rec in message.get('Records', []):
+                    key = rec.get('s3', {}).get('object', {}).get('key')
+                    if key:
+                        keys.append(key)
+            except Exception as ex:
+                logger.warning(f"Failed to parse SQS message body for keys: {ex}")
+    return list(set(keys))  # deduplicate
+
+
+def move_files_according_to_state_and_event(correlation_id: str, event: Dict[str, Any]) -> Dict[str, Any]:
+    if state_file_exists():
+        keys_to_move = extract_s3_keys_from_event(event)
+        if not keys_to_move:
+            logger.info(f"[{correlation_id}] State file exists but no keys found in event; nothing to move.")
+            return {
+                'total_files': 0,
+                'successful_moves': 0,
+                'failed_moves': 0,
+                'moved_files': [],
+                'failed_files': []
+            }
+        all_source_files = list_inventory_files(correlation_id)
+        files_to_move = [f for f in all_source_files if f['key'] in keys_to_move]
+    else:
+        files_to_move = list_inventory_files(correlation_id)
+
+    moved_files = []
+    failed_files = []
+
+    for file_info in files_to_move:
+        src_key = file_info['key']
+        success, dest_key = move_file_to_raw_zone(src_key, correlation_id)
+        if success:
+            moved_files.append({
+                'source_key': src_key,
+                'destination_key': dest_key,
+                'size': file_info['size'],
+                'moved_at': datetime.utcnow().isoformat()
+            })
+        else:
+            failed_files.append({
+                'source_key': src_key,
+                'error': 'Failed to move file',
+                'size': file_info['size']
+            })
+
+    state_content = {
+        'last_updated': datetime.utcnow().isoformat(),
+        'moved_files': moved_files
+    }
+    write_state_file(state_content)
+
+    log_message = (
+        f"[{correlation_id}] File movement completed: "
+        f"{len(moved_files)} successful, {len(failed_files)} failed"
+    )
+    logger.info(log_message)
+    write_log_to_s3(log_message, 'INFO')
+
+    return {
+        'total_files': len(files_to_move),
+        'successful_moves': len(moved_files),
+        'failed_moves': len(failed_files),
+        'moved_files': moved_files,
+        'failed_files': failed_files
+    }
+
+
+
 
 def move_file_to_raw_zone(source_key: str, correlation_id: str) -> Tuple[bool, str]:
     """
@@ -570,7 +674,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         logger.info(log_message)
         write_log_to_s3(log_message, 'INFO')
         
-        file_movement_results = process_file_movement(correlation_id)
+        file_movement_results = move_files_according_to_state_and_event(correlation_id)
         
         # Log file movement summary
         log_message = f"[{correlation_id}] File movement completed - {file_movement_results.get('successful_moves', 0)} successful, {file_movement_results.get('failed_moves', 0)} failed"
