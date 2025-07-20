@@ -1,5 +1,0 @@
-aws ecs update-service \
-  --cluster CRMDataCluster \
-  --service CRMDataConsumerTask-service-0qs1elmj \
-  --desired-count 2 \
-  --region us-east-1
