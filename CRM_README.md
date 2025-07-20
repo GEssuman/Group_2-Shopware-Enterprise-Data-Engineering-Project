@@ -220,7 +220,7 @@ LIMIT 10;
 
 **Purpose**: Provides real-time dashboards for the Customer Support Team.
 
-<img src="Images/CRM/Customer Support Dashboard.png" alt="Customer Support Dashboard">
+<img src="src/streaming/CRM/Images/CRM/Customer Support Dashboard.png" alt="Customer Support Dashboard">
 
 **Configuration**:
 
