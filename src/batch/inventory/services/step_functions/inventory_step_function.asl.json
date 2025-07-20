@@ -1,0 +1,241 @@
+{
+  "Comment": "A robust state machine to orchestrate the inventory data processing pipeline, including validation, transformation, and notifications for success or failure.",
+  "StartAt": "RunInventoryValidatorJob",
+  "States": {
+    "RunInventoryValidatorJob": {
+      "Type": "Task",
+      "Comment": "Runs the Glue job to validate the raw inventory data before any transformation.",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "inventory_validator",
+        "Arguments": {
+          "--correlation_id.$": "$$.Execution.Id",
+          "--input_path.$": "$.input_path",
+          "--execution_name.$": "$$.Execution.Name"
+        }
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Glue.InternalServiceException",
+            "Glue.ServiceException",
+            "Glue.ThrottlingException"
+          ],
+          "IntervalSeconds": 30,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        },
+        {
+          "ErrorEquals": [
+            "States.TaskFailed"
+          ],
+          "IntervalSeconds": 15,
+          "MaxAttempts": 2,
+          "BackoffRate": 1.5
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "NotifyFailure",
+          "ResultPath": "$.error",
+          "Comment": "Catch all validation errors and route to failure notification"
+        }
+      ],
+      "TimeoutSeconds": 3600,
+      "Next": "CheckValidationResults"
+    },
+    "CheckValidationResults": {
+      "Type": "Choice",
+      "Comment": "Checks if validation completed successfully before proceeding to transformation.",
+      "Choices": [
+        {
+          "Variable": "$.JobRunState",
+          "StringEquals": "SUCCEEDED",
+          "Next": "WaitForDataConsistency"
+        },
+        {
+          "Variable": "$.JobRunState",
+          "StringEquals": "FAILED",
+          "Next": "HandleValidationFailure"
+        }
+      ],
+      "Default": "HandleValidationFailure"
+    },
+    "HandleValidationFailure": {
+      "Type": "Pass",
+      "Comment": "Prepares error information for validation failure",
+      "Parameters": {
+        "error": {
+          "Error": "ValidationFailed",
+          "Cause": "Inventory data validation failed",
+          "JobRunState.$": "$.JobRunState",
+          "JobRunId.$": "$.Id"
+        }
+      },
+      "ResultPath": "$.error",
+      "Next": "NotifyFailure"
+    },
+    "WaitForDataConsistency": {
+      "Type": "Wait",
+      "Comment": "Waits for a short period to ensure data consistency before transformation.",
+      "Seconds": 60,
+      "Next": "RunInventoryTransformJob"
+    },
+    "RunInventoryTransformJob": {
+      "Type": "Task",
+      "Comment": "Runs the Glue job to transform the validated data and write it to the Delta Lake table.",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "inventory_transform",
+        "Arguments": {
+          "--correlation_id.$": "$$.Execution.Id",
+          "--validation_job_run_id.$": "$.Id",
+          "--input_path.$": "$.Arguments['--input_path']",
+          "--execution_name.$": "$$.Execution.Name"
+        }
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Glue.InternalServiceException",
+            "Glue.ServiceException",
+            "Glue.ThrottlingException"
+          ],
+          "IntervalSeconds": 30,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        },
+        {
+          "ErrorEquals": [
+            "States.TaskFailed"
+          ],
+          "IntervalSeconds": 15,
+          "MaxAttempts": 2,
+          "BackoffRate": 1.5
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "NotifyFailure",
+          "ResultPath": "$.error",
+          "Comment": "Catch all transformation errors and route to failure notification"
+        }
+      ],
+      "TimeoutSeconds": 7200,
+      "Next": "CheckTransformationResults"
+    },
+    "CheckTransformationResults": {
+      "Type": "Choice",
+      "Comment": "Checks if transformation completed successfully before sending success notification.",
+      "Choices": [
+        {
+          "Variable": "$.JobRunState",
+          "StringEquals": "SUCCEEDED",
+          "Next": "NotifySuccess"
+        },
+        {
+          "Variable": "$.JobRunState",
+          "StringEquals": "FAILED",
+          "Next": "HandleTransformationFailure"
+        }
+      ],
+      "Default": "HandleTransformationFailure"
+    },
+    "HandleTransformationFailure": {
+      "Type": "Pass",
+      "Comment": "Prepares error information for transformation failure",
+      "Parameters": {
+        "error": {
+          "Error": "TransformationFailed",
+          "Cause": "Inventory data transformation failed",
+          "JobRunState.$": "$.JobRunState",
+          "JobRunId.$": "$.Id"
+        }
+      },
+      "ResultPath": "$.error",
+      "Next": "NotifyFailure"
+    },
+    "NotifySuccess": {
+      "Type": "Task",
+      "Comment": "Publishes a success notification to the specified SNS topic with detailed execution information.",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "arn:aws:sns:us-east-1:985539772768:inventory_alert",
+        "Subject": "SUCCESS: Inventory Processing Pipeline Completed",
+        "Message": {
+          "status": "SUCCESS",
+          "message": "The inventory data processing workflow completed successfully.",
+          "execution_id.$": "$$.Execution.Id",
+          "execution_name.$": "$$.Execution.Name",
+          "start_time.$": "$$.Execution.StartTime",
+          "end_time.$": "$$.State.EnteredTime",
+          "validation_job_run_id.$": "$.Id",
+          "pipeline_details": {
+            "steps_completed": [
+              "validation",
+              "transformation"
+            ],
+            "correlation_id.$": "$$.Execution.Id"
+          }
+        }
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "SNS.ServiceException",
+            "SNS.ThrottlingException"
+          ],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "End": true
+    },
+    "NotifyFailure": {
+      "Type": "Task",
+      "Comment": "Publishes a failure notification to the specified SNS topic with comprehensive error details.",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "arn:aws:sns:us-east-1:985539772768:inventory_alert",
+        "Subject": "FAILURE: Inventory Processing Pipeline Failed",
+        "Message": {
+          "status": "FAILURE",
+          "message": "The inventory data processing workflow failed.",
+          "execution_id.$": "$$.Execution.Id",
+          "execution_name.$": "$$.Execution.Name",
+          "start_time.$": "$$.Execution.StartTime",
+          "failure_time.$": "$$.State.EnteredTime",
+          "error_details.$": "$.error",
+          "failed_state_details": {
+            "name.$": "$$.State.Name",
+            "entered_time.$": "$$.State.EnteredTime"
+          },
+          "troubleshooting": {
+            "check_glue_job_logs": "Review CloudWatch logs for the failed Glue job",
+            "check_input_data": "Verify input data format and availability",
+            "correlation_id.$": "$$.Execution.Id"
+          }
+        }
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "SNS.ServiceException",
+            "SNS.ThrottlingException"
+          ],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "End": true
+    }
+  }
+}

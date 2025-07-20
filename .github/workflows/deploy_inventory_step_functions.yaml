@@ -1,0 +1,178 @@
+name: Lab5 ETL Pipeline CI/CD
+on:
+  push:
+    branches: [ feature/batch-inventory ]
+  pull_request:
+    branches: [ feature/batch-inventory ]
+  workflow_dispatch:
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  STEP_FUNCTION_NAME: inventory_step_function 
+jobs:
+# Validate Step Function Definition
+  stepfunction-validate:
+    name: Validate Step Function
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    - name: Install AWS CLI and validation tools
+      run: |
+        pip install awscli boto3 jsonschema
+    - name: Validate Step Function JSON syntax
+      run: |
+        # Corrected file path based on the provided image
+        SF_DEFINITION_PATH="src/batch/inventory/services/step_functions/inventory_step_function.asl.json"
+        
+        if [ -f "$SF_DEFINITION_PATH" ]; then
+          echo "Validating Step Function JSON syntax..."
+          # Using jq for strict JSON parsing, then python -m json.tool for formatting check
+          cat "$SF_DEFINITION_PATH" | jq . > /dev/null
+          if [ $? -eq 0 ]; then
+            python -m json.tool "$SF_DEFINITION_PATH" > /dev/null
+            echo "Step Function JSON is valid"
+          else
+            echo "Step Function JSON has syntax errors according to jq."
+            exit 1
+        fi
+        else
+          echo "Step Function JSON file not found at $SF_DEFINITION_PATH"
+          exit 1
+        fi
+    - name: Validate Step Function Schema (Basic Structural)
+      run: |
+        # Corrected file path based on the provided image
+        SF_DEFINITION_PATH="src/batch/inventory/services/step_functions/inventory_step_function.asl.json"
+
+        # Create a basic schema validation script
+        cat > validate_stepfunction.py << 'EOF'
+        import json
+        import sys
+
+        def validate_stepfunction(file_path):
+            with open(file_path, 'r') as f:
+                try:
+                    definition = json.load(f)
+                except json.JSONDecodeError as e:
+                    print(f"ERROR: Invalid JSON in {file_path}: {e}")
+                    return False
+
+            # Basic validation checks
+            required_fields = ['Comment', 'StartAt', 'States']
+            for field in required_fields:
+                if field not in definition:
+                    print(f"Missing required field: {field}")
+                    return False
+            
+            # Check if StartAt state exists
+            start_state = definition.get('StartAt')
+            if not start_state:
+                print("Missing 'StartAt' field.")
+                return False
+            
+            if start_state not in definition['States']:
+                print(f"StartAt state '{start_state}' not found in States")
+                return False
+            
+            # Additional basic checks for common errors
+            for state_name, state_def in definition['States'].items():
+                if 'Type' not in state_def:
+                    print(f"State '{state_name}' is missing 'Type' field.")
+                    return False
+                # Add more checks here, e.g., if Type is Task, check for Resource
+                if state_def['Type'] == 'Task' and 'Resource' not in state_def:
+                    print(f"Task state '{state_name}' is missing 'Resource' field.")
+                    return False
+                
+                # --- Your NEW MODIFICATION START (paste here) ---
+                # Choice states define transitions in their 'Choices' and 'Default' fields, not 'Next' or 'End' directly
+                if state_def['Type'] == 'Choice':
+                    if not state_def.get('Choices') and not state_def.get('Default'):
+                        print(f"Choice state '{state_name}' must have 'Choices' or 'Default' field.")
+                        return False
+                    for choice in state_def.get('Choices', []):
+                        if 'Next' not in choice:
+                            print(f"Choice rule in state '{state_name}' is missing 'Next' field.")
+                            return False
+                    if 'Default' in state_def and state_def['Default'] not in definition['States']:
+                        print(f"Default state '{state_def['Default']}' in state '{state_name}' not found in States.")
+                        return False
+                # --- Your NEW MODIFICATION END ---
+
+                # Ensure 'Next' or 'End' is present for other non-terminal state types
+                # IMPORTANT: This 'if' was changed to 'elif'
+                elif state_def['Type'] not in ['Succeed', 'Fail']: # 'Pass', 'Task', 'Wait', 'Parallel' need Next/End
+                    if 'End' not in state_def and 'Next' not in state_def:
+                        print(f"State '{state_name}' of type '{state_def['Type']}' is missing 'Next' or 'End' field.")
+                        return False
+            
+            print("Step Function definition is valid (basic structural check passed).")
+            return True
+
+        if __name__ == "__main__":
+            # Using the corrected path
+            if validate_stepfunction(sys.argv[1] if len(sys.argv) > 1 else "MISSING_PATH"):
+                sys.exit(0)
+            else:
+                sys.exit(1)
+        EOF
+        # Pass the correct file path to the Python script
+        python validate_stepfunction.py "$SF_DEFINITION_PATH"
+# Deploy to AWS (only on main branch)
+  deploy:
+    name: Deploy to AWS
+    runs-on: ubuntu-latest
+    environment: production # Requires environment configured in GitHub repo settings
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
+    
+    - name: Deploy Step Function
+      run: |
+        SF_DEFINITION_PATH="src/batch/inventory/services/step_functions/inventory_step_function.asl.json"
+        
+        # Get current Step Function definition
+        CURRENT_DEF=$(aws stepfunctions describe-state-machine \
+          --state-machine-arn "arn:aws:states:${{ secrets.AWS_REGION }}:985539772768:stateMachine:$STEP_FUNCTION_NAME" \
+          --query 'definition' --output text 2>/dev/null || echo "")
+        
+        # Read new definition and compact it
+        NEW_DEF=$(cat "$SF_DEFINITION_PATH" | jq -c .) # Using the corrected path
+        
+        if [ -n "$CURRENT_DEF" ]; then
+          echo "Updating existing Step Function..."
+          aws stepfunctions update-state-machine \
+            --state-machine-arn "arn:aws:states:${{ secrets.AWS_REGION }}:985539772768:stateMachine:$STEP_FUNCTION_NAME" \
+            --definition "$NEW_DEF"
+          echo "Step Function updated successfully"
+        else
+          echo "Creating new Step Function..."
+          aws stepfunctions create-state-machine \
+            --name "$STEP_FUNCTION_NAME" \
+            --definition "$NEW_DEF" \
+            --role-arn "arn:aws:iam::985539772768:role/inventory_step_function_role"
+          echo "Step Function created successfully"
+        fi
+    - name: Run Integration Tests (Basic Status Check)
+      run: |
+        echo "Running post-deployment validation..."
+        # Check if Step Function is active
+        STATUS=$(aws stepfunctions describe-state-machine \
+          --state-machine-arn "arn:aws:states:${{ secrets.AWS_REGION }}:985539772768:stateMachine:$STEP_FUNCTION_NAME" \
+          --query 'status' --output text)
+        if [ "$STATUS" = "ACTIVE" ]; then
+          echo "Step Function is active and ready"
+        else
+          echo "Step Function status: $STATUS"
+          exit 1
+        fi

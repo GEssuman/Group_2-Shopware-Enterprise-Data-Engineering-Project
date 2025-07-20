@@ -2,10 +2,10 @@ name: Deploy Lambda Functions
 
 on:
   push:
-    branches: [ main ]
+    branches: [ feature/batch-inventory ]
     paths:
       - '.github/workflows/deploy_inventory_lambda.yaml' 
-      - 'src/batch/inventory/services/lambda/**'
+      - 'src/batch/inventory/services/lambda_service/**'
   workflow_dispatch:
 
 env:
@@ -35,14 +35,14 @@ jobs:
     # Package Lambda
     - name: Package Lambda
       run: |
-        cd src/batch/inventory/services/lambda
+        cd src/batch/inventory/services/lambda_service
         pip install -r requirements.txt -t .
-        zip -r ../../lambda-deployment.zip .
+        zip -r ../lambda-deployment.zip .
 
     # Upload Lambda ZIP to S3
     - name: Upload Lambda ZIP to S3
       run: |
-        aws s3 cp lambda-deployment.zip s3://${{ secrets.PROJECT_BUCKET }}/scripts/lambda/lambda-deployment.zip
+        aws s3 cp src/batch/inventory/services/lambda-deployment.zip s3://${{ secrets.PROJECT_BUCKET }}/scripts/lambda/inventory/lambda-deployment.zip
 
     # Wait for Lambda to be ready before update
     - name: Wait for Lambda to be ready before update
@@ -55,7 +55,7 @@ jobs:
         aws lambda update-function-code \
           --function-name ${{ secrets.LAMBDA_FUNCTION_NAME }} \
           --s3-bucket ${{ secrets.PROJECT_BUCKET }} \
-          --s3-key scripts/lambda/lambda-deployment.zip \
+          --s3-key scripts/lambda/inventory/lambda-deployment.zip \
           --region ${{ secrets.AWS_REGION }}
 
     # Wait for Lambda code update to complete
@@ -68,5 +68,6 @@ jobs:
       run: |
         aws lambda update-function-configuration \
           --function-name ${{ secrets.LAMBDA_FUNCTION_NAME }} \
-          --environment "Variables={PROJECT_BUCKET=${{ secrets.PROJECT_BUCKET }},LOGS_DATA_PREFIX=logs/}" \
+          --environment "Variables={PROJECT_BUCKET=${{ secrets.PROJECT_BUCKET }},LOG_FILE_PREFIX=logs/lambda/inventory/log,STATE_MACHINE_ARN=${{ secrets.STATE_MACHINE_ARN }}}" \
           --region ${{ secrets.AWS_REGION }}
+
