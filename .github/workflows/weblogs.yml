@@ -1,0 +1,174 @@
+name: Deploy weblogs and Push ECS Images
+
+on:
+  push:
+    paths:
+      - 'src/streaming/WEB/services/scripts/**'
+      - 'src/streaming/WEB/services/docker/**'
+      - 'src/streaming/WEB/services/ecs/**'
+      - 'src/streaming/WEB/services/lambda/**'
+      - '.github/workflows/weblogs.yml'
+    branches:
+      - feature/weblogs
+
+env:
+  ECR_REPOSITORY_API: weblogs/api-gtp
+
+jobs:
+  build-and-push-ecr:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install AWS CLI
+        run: python -m pip install --upgrade pip
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push api Docker image
+        run: |
+          IMAGE_URI_API="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_API }}:api"
+          docker build -t $IMAGE_URI_API -f src/streaming/WEB/services/docker/dockerfile-api src/streaming/WEB/services/
+          docker push $IMAGE_URI_API
+          echo "IMAGE_URI_API=$IMAGE_URI_API" > image_uris.txt
+
+      - name: Upload image URIs as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-uris
+          path: image_uris.txt
+
+  register-ecs-tasks:
+    runs-on: ubuntu-latest
+    needs: build-and-push-ecr
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Download image URIs artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: image-uris
+
+      - name: Load image URIs into environment
+        run: |
+          source image_uris.txt
+          echo "IMAGE_URI_API=$IMAGE_URI_API" >> $GITHUB_ENV
+
+      - name: Debug loaded image URIs
+        run: echo "API Image URI:$IMAGE_URI_API"
+
+      - name: Replace image URI in api task definition
+        run: |
+          sed "s|\${IMAGE_URI_API}|$IMAGE_URI_API|g" src/streaming/WEB/services/ecs/api_taskdefinition.json > temp-api.json
+          sed "s|<ACCOUNT_ID>|${{ secrets.AWS_ACCOUNT_ID }}|g" temp-api.json > temp-api-2.json
+          sed "s|\${AWS_REGION}|${AWS_REGION}|g" temp-api-2.json > rendered-task-def-api.json
+
+      - name: Register ECS task definition - api
+        id: register-task-def-api
+        run: |
+          aws ecs register-task-definition --cli-input-json file://rendered-task-def-api.json > taskdef-register-output-api.json
+          cat taskdef-register-output-api.json
+
+      - name: Update ECS Service - api
+        run: |
+          TASK_DEF_ARN_API=$(python3 -c "import json; print(json.load(open('taskdef-register-output-api.json'))['taskDefinition']['taskDefinitionArn'])")
+          echo "Updating ECS Service 'weblogs-api-service' to use task definition: $TASK_DEF_ARN_API"
+
+          aws ecs update-service \
+            --cluster weblogs-api \
+            --service weblogs-api-service \
+            --task-definition "$TASK_DEF_ARN_API" \
+            --force-new-deployment \
+            --network-configuration "awsvpcConfiguration={subnets=[subnet-0a3d6890884fa19d2,subnet-0e77aaa29a6fe5946],securityGroups=[sg-0d23674697d6a5c88],assignPublicIp=DISABLED}"
+
+  deploy-lambdas:
+    runs-on: ubuntu-latest
+    needs: build-and-push-ecr
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install boto3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Deploy transformation Lambda
+        run: |
+          FUNCTION_NAME="weblogs-lambda"
+          ZIP_FILE="transformation.zip"
+          zip -j $ZIP_FILE src/streaming/WEB/services/lambda/transformation.py
+
+          if aws lambda get-function --function-name $FUNCTION_NAME > /dev/null 2>&1; then
+            echo "Updating existing function $FUNCTION_NAME"
+            aws lambda update-function-code \
+              --function-name $FUNCTION_NAME \
+              --zip-file fileb://$ZIP_FILE
+          else
+            echo "Creating new function $FUNCTION_NAME"
+            aws lambda create-function \
+              --function-name $FUNCTION_NAME \
+              --runtime python3.10 \
+              --role arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/weblogs-lambda-role-1awjd0og \
+              --handler transformation.lambda_handler \
+              --zip-file fileb://$ZIP_FILE
+          fi
+
+      - name: Deploy s3toathena Lambda
+        run: |
+          FUNCTION_NAME="weblogs-toredshift"
+          ZIP_FILE="s3toathena.zip"
+          zip -j $ZIP_FILE src/streaming/WEB/services/lambda/s3toathena.py
+
+          if aws lambda get-function --function-name $FUNCTION_NAME > /dev/null 2>&1; then
+            echo "Updating existing function $FUNCTION_NAME"
+            aws lambda update-function-code \
+              --function-name $FUNCTION_NAME \
+              --zip-file fileb://$ZIP_FILE
+          else
+            echo "Creating new function $FUNCTION_NAME"
+            aws lambda create-function \
+              --function-name $FUNCTION_NAME \
+              --runtime python3.10 \
+              --role arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:weblogs-lambda-role-1awjd0og \
+              --handler lambda_function.lambda_handler \
+              --zip-file fileb://$ZIP_FILE
+          fi

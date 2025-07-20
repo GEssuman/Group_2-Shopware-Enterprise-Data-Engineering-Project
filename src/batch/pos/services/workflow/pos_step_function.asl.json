@@ -1,0 +1,213 @@
+{
+  "StartAt": "ValidateFiles",
+  "States": {
+    "ValidateFiles": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::glue:startJobRun.sync",
+      "Parameters": {
+        "JobName": "POS-validator",
+        "Arguments": {
+          "--EVENT_TIME.$": "States.Format('{}', $.event_time)"
+        }
+      },
+      "ResultPath": "$.validation_result",
+      "Next": "Fetch Validation Result",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "NotifyValidationFailure"
+        }
+      ],
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.TaskFailed",
+            "States.ResultPathMatchFailure",
+            "States.IntrinsicFailure",
+            "States.Timeout",
+            "States.HeartbeatTimeout"
+          ],
+          "BackoffRate": 2,
+          "IntervalSeconds": 1,
+          "MaxAttempts": 3
+        }
+      ]
+    },
+    "NotifyValidationFailure": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "arn:aws:sns:us-east-1:985539772768:pos-pipeline-notification",
+        "Message.$": "States.Format('POS Validation job failed for event_time: {}', $.event_time)"
+      },
+      "Next": "ValidationFailed"
+    },
+    "ValidationFailed": {
+      "Type": "Fail"
+    },
+    "Fetch Validation Result": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:s3:getObject",
+      "Parameters": {
+        "Bucket": "misc-gtp-proj",
+        "Key.$": "States.Format('landing_zone/validated/pos/pos-validation-result/validation_summary_{}.json', $.event_time)"
+      },
+      "ResultSelector": {
+        "Body.$": "States.StringToJson($.Body)"
+      },
+      "ResultPath": "$.validationOutput",
+      "Next": "CheckValidationOutcome"
+    },
+    "CheckValidationOutcome": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.validationOutput.Body.processed_files",
+          "NumericGreaterThan": 0,
+          "Next": "ProcessValidFiles"
+        }
+      ],
+      "Default": "NotifyAllQuarantined"
+    },
+    "ProcessValidFiles": {
+      "Type": "Parallel",
+      "ResultPath": "$.parallelResults",
+      "Branches": [
+        {
+          "StartAt": "ContinueETL",
+          "States": {
+            "ContinueETL": {
+              "Type": "Pass",
+              "Result": "Validation checkpoint passed",
+              "ResultPath": "$.validationStatus",
+              "Next": "TransformValidPOS"
+            },
+            "TransformValidPOS": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::glue:startJobRun.sync",
+              "Parameters": {
+                "JobName": "POS-transformation-job",
+                "Arguments": {
+                  "--EVENT_TIME.$": "States.Format('{}', $.event_time)"
+                }
+              },
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "ResultPath": "$.transformError",
+                  "Next": "TransformationFailure"
+                }
+              ],
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "States.Timeout",
+                    "States.HeartbeatTimeout",
+                    "States.TaskFailed",
+                    "States.IntrinsicFailure"
+                  ],
+                  "BackoffRate": 2,
+                  "IntervalSeconds": 1,
+                  "MaxAttempts": 3
+                }
+              ],
+              "Next": "TransformationSuccess"
+            },
+            "TransformationSuccess": {
+              "Result": {
+                "transformation_error": false,
+                "message": "Validation step failed"
+              },
+              "Type": "Pass",
+              "End": true
+            },
+            "TransformationFailure": {
+              "Result": {
+                "transformation_error": true,
+                "message": "Validation step failed"
+              },
+              "Type": "Pass",
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "CheckQuarantine",
+          "States": {
+            "CheckQuarantine": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.validation_result.quarantined_files[0]",
+                  "IsPresent": true,
+                  "Next": "SendPartialQuarantineNotification"
+                }
+              ],
+              "Default": "NoQuarantine"
+            },
+            "SendPartialQuarantineNotification": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::sns:publish",
+              "Parameters": {
+                "TopicArn": "arn:aws:sns:us-east-1:985539772768:pos-pipeline-notification",
+                "Message": {
+                  "Fn::Sub": "Partial quarantine detected: ${$.validation_result.quarantined_files}"
+                }
+              },
+              "End": true
+            },
+            "NoQuarantine": {
+              "Type": "Pass",
+              "End": true
+            }
+          }
+        }
+      ],
+      "Next": "Choice"
+    },
+    "Choice": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.parallelResults[0].transformation_error",
+          "BooleanEquals": true,
+          "Next": "NotifyTransformationFailure"
+        }
+      ],
+      "Default": "StartCrawler"
+    },
+    "NotifyTransformationFailure": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "arn:aws:sns:us-east-1:985539772768:pos-pipeline-notification",
+        "Message.$": "States.Format('POS transformation job failed for event_time: {}', $.event_time)"
+      },
+      "Next": "TransformationFailed"
+    },
+    "TransformationFailed": {
+      "Type": "Fail"
+    },
+    "StartCrawler": {
+      "Type": "Task",
+      "Parameters": {
+        "Name": "pos_batch_crawler"
+      },
+      "Resource": "arn:aws:states:::aws-sdk:glue:startCrawler",
+      "End": true
+    },
+    "NotifyAllQuarantined": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "arn:aws:sns:us-east-1:985539772768:pos-pipeline-notification",
+        "Message": "All input files were quarantined. No processing done."
+      },
+      "End": true
+    }
+  }
+}

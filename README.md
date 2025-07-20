@@ -24,7 +24,7 @@ The pipelines collectively enable the processing, storage, and analysis of inven
    - Orchestrated by AWS Step Functions, with Lambda triggers and Glue jobs.
 
 ## Architecture
-![alt text](architecture/Diagram.svg)
+![alt text](images/architecture.svg)
 
 ### Web Analytics Pipeline
 - **API Consumer (`api.py`)**: Polls a web traffic API, validates events, and streams them to Kinesis.
