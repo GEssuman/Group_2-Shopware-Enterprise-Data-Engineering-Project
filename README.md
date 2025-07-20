@@ -1,1 +1,0 @@
-# Group_2-Shopware-Enterprise-Data-Engineering-Project
