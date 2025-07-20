@@ -1,0 +1,70 @@
+name: Deploy Lambda with Kinesis Trigger
+
+on:
+  push:
+    branches:
+      - feature/POS-batch
+    paths:
+      - src/batch/pos/services/lambda/invoke_step_function.py
+      - .github/workflows/deploy_pos_lambda.yaml
+
+jobs:
+  deploy-pos-step-function-invoker:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python (if using Python Lambda)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Package Lambda Function
+        run: |
+          mkdir -p package
+          cp src/batch/pos/services/lambda/invoke_step_function.py package/
+          cd package
+          zip -r ../lambda.zip .
+
+       # Wait for Lambda to be ready before update
+      - name: Wait for Lambda to be ready before update
+        run: |
+          aws lambda wait function-updated --function-name POSStepFunction_Invoker --region ${{ secrets.AWS_REGION }}
+
+
+      - name: Deploy or Update Lambda Function
+        run: |
+          if aws lambda get-function --function-name POSStepFunction_Invoker 2>/dev/null; then
+            echo "Updating existing Lambda function..."
+            aws lambda update-function-code \
+              --function-name POSStepFunction_Invoker \
+              --zip-file fileb://lambda.zip
+
+            aws lambda wait function-updated --function-name POSStepFunction_Invoker --region ${{ secrets.AWS_REGION }}
+
+
+            aws lambda update-function-configuration \
+              --function-name POSStepFunction_Invoker \
+              --environment "Variables={POS_STEP_FUNCTION_ARN=arn:aws:states:${{ secrets.AWS_REGION }}:${{ secrets.AWS_ACCOUNT_ID }}:stateMachine:${{ secrets.POS_STEP_FUNCTION_NAME }}}"
+          else
+            echo "Creating new Lambda function..."
+            aws lambda create-function \
+              --function-name POSStepFunction_Invoker \
+              --runtime python3.12 \
+              --role arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/service-role/POSStepFunction_Invoker-role-ao9djfyj \
+              --handler invoke_step_function.lambda_handler \
+              --zip-file fileb://lambda.zip \
+              --timeout 30 \
+              --memory-size 128 \
+              --environment "Variables={POS_STEP_FUNCTION_ARN=${{ secrets.POS_STEP_FUNCTION_NAME }}}"
+          fi
+      

@@ -1,0 +1,82 @@
+name: Deploy to AWS Lambda (Alerting)
+
+on:
+  push:
+    paths:
+      - "src/streaming/CRM/services/alerting_system/**"
+      - ".github/workflows/deploy-crm-alerting.yml"
+    branches:
+      - feature/crm
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+  LAMBDA_FUNCTION_NAME: CRMDataAlertingLambda
+  S3_BUCKET: ${{ secrets.CRM_S3_BUCKET }}
+  LAMBDA_ROLE_ARN: ${{ secrets.CRM_LAMBDA_ROLE_ARN }}
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy Alerting Lambda
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+
+      - name: Install Dependencies
+        run: |
+          mkdir -p src/streaming/CRM/services/alerting_system/package
+          pip install boto3==1.28.57 -t src/streaming/CRM/services/alerting_system/package/
+          cd src/streaming/CRM/services/alerting_system
+          cp alerting_lambda.py package/
+          cd package
+          zip -r ../alerting_lambda.zip .
+
+      - name: Upload to S3
+        run: |
+          aws s3 cp src/streaming/CRM/services/alerting_system/alerting_lambda.zip s3://$S3_BUCKET/alerting_lambda.zip
+        env:
+          S3_BUCKET: ${{ env.S3_BUCKET }}
+
+      - name: Update Lambda Function
+        run: |
+          aws lambda update-function-code \
+            --function-name $LAMBDA_FUNCTION_NAME \
+            --s3-bucket $S3_BUCKET \
+            --s3-key alerting_lambda.zip \
+            --region $AWS_REGION
+        env:
+          LAMBDA_FUNCTION_NAME: ${{ env.LAMBDA_FUNCTION_NAME }}
+          S3_BUCKET: ${{ env.S3_BUCKET }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+
+      - name: Wait for Lambda Update
+        run: |
+          aws lambda wait function-updated \
+            --function-name $LAMBDA_FUNCTION_NAME \
+            --region $AWS_REGION
+        env:
+          LAMBDA_FUNCTION_NAME: ${{ env.LAMBDA_FUNCTION_NAME }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+
+      - name: Notify on Failure
+        if: failure()
+        run: |
+          echo "Deployment failed. Check logs for details."
+          exit 1
