@@ -25,7 +25,7 @@ delta_path = f"s3://{args['ETL_LANDING_S3_BUCKET']}/landing_zone/processed/pos"
 sales_kpi_path = f"s3://{args['ETL_LANDING_S3_BUCKET']}/landing_zone/kpi/sales/sales_per_product"
 archive_bucket = args['ARCHIVE_BUCKET']
 source_bucket = args['POS_S3_BUCKET']
-s3_input_path = f"s3://{source_bucket}/pos"
+s3_input_path = f"s3://{source_bucket}/pos/"
 
 schema = StructType([
     StructField("transaction_id", StringType()),
