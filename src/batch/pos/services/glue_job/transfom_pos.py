@@ -22,6 +22,7 @@ spark = glueContext.spark_session
 # Get job arguments
 args = getResolvedOptions(sys.argv, ['JOB_NAME', 'POS_S3_BUCKET', 'ETL_LANDING_S3_BUCKET','ARCHIVE_BUCKET'])
 delta_path = f"s3://{args['ETL_LANDING_S3_BUCKET']}/landing_zone/processed/pos"
+sales_kpi_path = f"s3://{args['ETL_LANDING_S3_BUCKET']}/landing_zone/kpi/sales/sales_per_product"
 archive_bucket = args['ARCHIVE_BUCKET']
 source_bucket = args['POS_S3_BUCKET']
 s3_input_path = f"s3://{source_bucket}/pos"
@@ -115,12 +116,55 @@ def main():
     df = df.withColumn("timestamp", F.from_unixtime(F.col("timestamp")).cast("timestamp"))\
             .withColumn("date", F.to_date("timestamp"))
     df = df.dropDuplicates()
+
     df.write.format("delta") \
             .partitionBy("date") \
             .mode("append") \
             .save(delta_path)
-    
+
     archive_all_csv_files(source_bucket, "pos/", archive_bucket)
+    
+    ##Implement sales per product
+    try:
+
+        # Compute sales per product per day
+        logging.info("Computing total sales per product per day...")
+        sales_per_product = df.withColumn("date", F.to_date("timestamp")) \
+            .groupBy("product_id", "date") \
+            .agg(F.sum("revenue").alias("total_sales"))
+
+        # Load target Delta table
+        logging.info("Checking if sales KPI Delta table exists...")
+        if DeltaTable.isDeltaTable(spark, sales_kpi_path):
+            logging.info("Sales KPI Delta table found. Merging new records...")
+            sales_per_product_table = DeltaTable.forPath(spark, sales_kpi_path)
+
+            # Perform MERGE (upsert)
+            (
+                sales_per_product_table.alias("target")
+                .merge(
+                    sales_per_product.alias("source"),
+                    "target.product_id = source.product_id AND target.date = source.date"
+                )
+                .whenMatchedUpdate(set={
+                    "total_sales": "target.total_sales + source.total_sales",
+                })
+                .whenNotMatchedInsertAll()
+                .execute()
+            )
+            logging.info("Sales KPI table updated successfully.")
+        else:
+            logging.info("Sales KPI Delta table not found. Creating new one...")
+            sales_per_product.write.format("delta") \
+                .partitionBy("date") \
+                .mode("overwrite") \
+                .save(sales_kpi_path)
+            logging.info("Sales KPI Delta table created successfully.")
+
+    except Exception as e:
+        logging.error(f"Failed to compute or update sales KPI table: {e}")
+    
+    
 
 if __name__ == "__main__":
     main()
