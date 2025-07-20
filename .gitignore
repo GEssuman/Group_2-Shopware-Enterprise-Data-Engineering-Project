@@ -184,6 +184,4 @@ src/streaming/CRM/services/consumer/Dockerfile
 src/streaming/CRM/services/consumer/requirements.txt
 src/streaming/CRM/services/consumer/task-definition.json
 src/streaming/CRM/services/consumer/scale_up_ecs_service.txt
-src/streaming/CRM/services/consumer/lambda_function_copy.py
-
 add_gitkeep.py
