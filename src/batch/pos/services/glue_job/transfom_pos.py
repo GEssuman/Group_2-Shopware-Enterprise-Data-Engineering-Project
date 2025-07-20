@@ -117,12 +117,7 @@ def main():
             .withColumn("date", F.to_date("timestamp"))
     df = df.dropDuplicates()
 
-    df.write.format("delta") \
-            .partitionBy("date") \
-            .mode("append") \
-            .save(delta_path)
-
-    archive_all_csv_files(source_bucket, "pos/", archive_bucket)
+   
     
     ##Implement sales per product
     try:
@@ -133,11 +128,14 @@ def main():
             .groupBy("product_id", "date") \
             .agg(F.sum("revenue").alias("total_sales"))
 
+        sales_per_product.show()
+
         # Load target Delta table
         logging.info("Checking if sales KPI Delta table exists...")
         if DeltaTable.isDeltaTable(spark, sales_kpi_path):
             logging.info("Sales KPI Delta table found. Merging new records...")
             sales_per_product_table = DeltaTable.forPath(spark, sales_kpi_path)
+
 
             # Perform MERGE (upsert)
             (
@@ -163,6 +161,13 @@ def main():
 
     except Exception as e:
         logging.error(f"Failed to compute or update sales KPI table: {e}")
+
+    df.write.format("delta") \
+            .partitionBy("date") \
+            .mode("append") \
+            .save(delta_path)
+
+    archive_all_csv_files(source_bucket, "pos/", archive_bucket)
     
     
 
