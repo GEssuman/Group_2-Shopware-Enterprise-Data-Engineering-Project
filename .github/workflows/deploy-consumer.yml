@@ -41,18 +41,12 @@ jobs:
 
       - name: Install Dependencies
         run: |
-<<<<<<< HEAD
-          docker build -t $ECR_REGISTRY/$CRM_CONSUMER_ECR_REPOSITORY:$IMAGE_TAG ./src/streaming/CRM/services/consumer
-          docker push $ECR_REGISTRY/$CRM_CONSUMER_ECR_REPOSITORY:$IMAGE_TAG
-          echo "image=$ECR_REGISTRY/$CRM_CONSUMER_ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
-=======
           mkdir -p src/streaming/CRM/services/consumer/package
           pip install boto3==1.28.57 -t src/streaming/CRM/services/consumer/package/
           cd src/streaming/CRM/services/consumer
           cp lambda_function.py package/
           cd package
           zip -r ../lambda_function.zip .
->>>>>>> b9b0d6b (Rename consumer.py to lambda_function.py to fix ImportModuleError)
 
       - name: Upload to S3
         run: |
