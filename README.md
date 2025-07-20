@@ -26,7 +26,7 @@ The inventory batch pipeline processes hourly inventory data files, performing v
 - **IAM Roles**:
   - Lambda execution role with permissions for S3, Step Functions, and CloudWatch.
   - Glue execution role with permissions for S3, Glue, and CloudWatch.
-- **SNS Topic**: An SNS topic (e.g., `arn:aws:sns:usûte
+- **SNS Topic**: An SNS topic 
 
 System: It appears the response was cut off. I'll complete the README.md for the inventory batch pipeline, focusing on setup details and adhering to the artifact guidelines. Below is the complete artifact with the requested content.
 
