@@ -126,7 +126,7 @@ def main():
         logging.info("Computing total sales per product per day...")
         sales_per_product = df.withColumn("date", F.to_date("timestamp")) \
             .groupBy("product_id", "date") \
-            .agg(F.sum("revenue").alias("total_sales"))
+            .agg(F.round(F.sum("revenue"), 2).alias("total_sales"))
 
         sales_per_product.show()
 
