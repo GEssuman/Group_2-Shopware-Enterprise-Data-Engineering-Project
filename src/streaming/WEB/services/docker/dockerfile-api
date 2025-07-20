@@ -1,0 +1,16 @@
+FROM python:3.9-slim
+
+# Copy and install Python dependencies
+COPY scripts/requirements.txt .
+
+
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Set working directory
+WORKDIR /app
+
+# Copy your Python script(s)
+COPY scripts/api.py .
+
+# Default command
+CMD ["python", "api.py"]

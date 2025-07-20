@@ -176,6 +176,8 @@ pyrightconfig.json
 # End of https://www.toptal.com/developers/gitignore/api/python
 
 
+grp_proj_env/.DS_Store
+.DS_Store
 grp_proj_env/
 src/streaming/CRM/services/consumer/consumer4ecs.py
 src/streaming/CRM/services/consumer/Dockerfile
@@ -185,5 +187,3 @@ src/streaming/CRM/services/consumer/scale_up_ecs_service.txt
 src/streaming/CRM/services/consumer/lambda_function_copy.py
 
 add_gitkeep.py
-
-.gitignore
