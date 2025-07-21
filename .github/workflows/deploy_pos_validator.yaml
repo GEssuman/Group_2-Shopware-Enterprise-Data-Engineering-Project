@@ -1,0 +1,79 @@
+name: Deploy Glue Job
+
+on:
+  push:
+    branches:
+      - feature/POS-batch
+    paths:
+      - src/batch/pos/services/validator/validate.py
+      - .github/workflows/deploy_pos_validator.yaml
+
+jobs:
+  deploy-glue-job:
+    runs-on: ubuntu-latest
+
+    env:
+      SCRIPT_PATH: src/batch/pos/services/validator/validate.py
+      SCRIPT_S3_KEY: pos/validate.py
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up AWS CLI
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Upload Glue script to S3
+        run: |
+          echo "Uploading ${SCRIPT_PATH} to ${{ secrets.GLUE_SCRIPT_S3_PATH }}/$SCRIPT_S3_KEY"
+          aws s3 cp "$SCRIPT_PATH" "${{ secrets.GLUE_SCRIPT_S3_PATH }}/$SCRIPT_S3_KEY"
+
+      - name: Create or Update Glue Job
+        run: |
+          JOB_NAME="POS-validator"
+          SCRIPT_LOCATION="${{ secrets.GLUE_SCRIPT_S3_PATH }}/$SCRIPT_S3_KEY"
+          ROLE_ARN="arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/AWSShopware-Validator-Role"
+
+          echo "Checking if Glue job $JOB_NAME exists..."
+          if aws glue get-job --job-name "$JOB_NAME" >/dev/null 2>&1; then
+            echo "Updating existing Glue job: $JOB_NAME"
+            aws glue update-job \
+              --job-name "$JOB_NAME" \
+              --job-update "$(jq -n \
+                --arg role "$ROLE_ARN" \
+                --arg script "$SCRIPT_LOCATION" \
+                --arg raw "${{ secrets.BATCH_SOURCE_BUCKET }}" \
+                --arg landing "${{ secrets.BATCH_QUARANTINE_BUCKET }}" \
+                '{
+                  Role: $role,
+                  Command: {
+                    Name: "pythonshell",
+                    ScriptLocation: $script,
+                    PythonVersion: "3"
+                  },
+                  DefaultArguments: {
+                    "--AWS_SOURCE_S3_BUCKET": $raw,
+                    "--ETL_LANDING_S3_BUCKET": $landing
+                  },
+                  MaxCapacity: 1.0,
+                  ExecutionProperty: {
+                    MaxConcurrentRuns: 1
+                  }
+                }')"
+          else
+            echo "Creating new Glue job: $JOB_NAME"
+            aws glue create-job \
+              --name "$JOB_NAME" \
+              --role "$ROLE_ARN" \
+              --command Name=pythonshell,ScriptLocation="$SCRIPT_LOCATION",PythonVersion=3 \
+              --default-arguments '{
+                "--AWS_SOURCE_S3_BUCKET": "${{ secrets.BATCH_SOURCE_BUCKET }}",
+                "--ETL_LANDING_S3_BUCKET": "${{ secrets.BATCH_QUARANTINE_BUCKET }}"
+              }' \
+              --max-capacity 1.0 \
+              --execution-property MaxConcurrentRuns=1
+          fi

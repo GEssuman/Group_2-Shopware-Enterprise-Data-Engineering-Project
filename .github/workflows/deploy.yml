@@ -1,0 +1,73 @@
+name: Deploy to Amazon ECS (Producer)
+
+on:
+  push:
+    paths:
+      - "src/streaming/CRM/services/producer/**"
+      - ".github/workflows/deploy.yml"
+    branches:
+      - feature/crm
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+  CRM_ECR_REPOSITORY: ${{ secrets.CRM_ECR_REPOSITORY }}
+  CRM_ECS_SERVICE: ${{ secrets.CRM_ECS_SERVICE }}
+  CRM_ECS_CLUSTER: ${{ secrets.CRM_ECS_CLUSTER }}
+  CRM_ECS_TASK_DEFINITION: ${{ secrets.CRM_ECS_TASK_DEFINITION }}
+  CRM_CONTAINER_NAME: ${{ secrets.CRM_CONTAINER_NAME }}
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy Producer to ECS
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, Tag, and Push Image to Amazon ECR
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$CRM_ECR_REPOSITORY:$IMAGE_TAG ./src/streaming/CRM/services/producer
+          docker push $ECR_REGISTRY/$CRM_ECR_REPOSITORY:$IMAGE_TAG
+          echo "image=$ECR_REGISTRY/$CRM_ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Fill in the New Image ID in the Amazon ECS Task Definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ${{ env.CRM_ECS_TASK_DEFINITION }}
+          container-name: ${{ env.CRM_CONTAINER_NAME }}
+          image: ${{ steps.build-image.outputs.image }}
+
+      - name: Deploy Amazon ECS Task Definition
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ env.CRM_ECS_SERVICE }}
+          cluster: ${{ env.CRM_ECS_CLUSTER }}
+          wait-for-service-stability: true
+
+      - name: Notify on Failure
+        if: failure()
+        run: |
+          echo "Deployment failed. Check logs for details."
+          exit 1
