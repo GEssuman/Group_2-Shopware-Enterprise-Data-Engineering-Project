@@ -12,21 +12,59 @@ The pipelines collectively enable the processing, storage, and analysis of inven
    - Ingests web event data from an API, processes it through Kinesis, and stores it in S3 as Parquet files.
    - Computes engagement and loyalty metrics via Athena queries.
    - Runs a Dockerized API consumer on ECS Fargate.
+   - [WEB Module Documentation](src/streaming/WEB/services/readme.md)
 
 **Customer Interactions Pipeline**:
    - Streams real-time customer interaction data from an API, processes it via Kinesis and Lambda, and stores it in S3 as Parquet files.
    - Provides real-time dashboards in QuickSight and alerts for negative interactions.
    - Deployed with CI/CD via GitHub Actions.
+   - [CRM Module Documentation](src/streaming/CRM/CRM_README.md)
 
 **Inventory Batch Processing Pipeline**:
    - Processes hourly inventory batch data (JSONL format) from an S3 source.
    - Validates, transforms, and stores data in a Delta Lake table for querying.
    - Orchestrated by AWS Step Functions, with Lambda triggers and Glue jobs.
+   - [Inventory Module Documentation](src/batch/inventory/services/inventory_readme.md)
+
+**POS Batch Processsing Pipeline**:
+  - Ingests daily POS data in csv format into an S3 bucket using S3 event triggers.
+  - Validates the files using a Glue Python Shell job
+  - Transforms and aggregates valid data using a Glue Spark job
+  - Orchestrated with AWS Step Functions and monitored via CloudWatch.
+  - Failure notifications sent via SNS for invalid data or job failures.
+   - [POS Pipeline Module Documentation](src/batch/pos/readme.md)
 
 ## Architecture
 ![alt text](images/architecture/architecture.svg)
 
-### Web Analytics Pipeline
+
+## Project Structure
+```
+shopware-data-pipelines/
+│
+├── README.md                          # Main project documentation
+│
+├── images/                            # Diagrams and visuals
+│   ├── architecture/
+│   ├── inventor/     #inventory related images
+│   ├── CRM/          #CRM related images
+│   ├── WEB/          #WEB related images
+│   └── pos/          #pos related images
+│       
+│
+├── src/                               
+│   ├── batch/
+│   │   ├── inventory/        # Inventory source codes
+│   │   └── pos               #pos source codes
+│   ├── streaming/
+│   │   ├── CRM               # CRM source codes
+│   │   └── WEB               # WEM source codes
+│   
+│
+├── README.md
+```
+
+<!-- ### Web Analytics Pipeline
 - **API Consumer (`api.py`)**: Polls a web traffic API, validates events, and streams them to Kinesis.
 - **Transformation Lambda (`transformation.py`)**: Processes Kinesis records, validates, transforms, and writes Parquet files to `s3://weblogs-bucket-gtp/events/` with year/month/day/hour partitioning.
 - **Athena Partition Registration (`s3toathena.py`)**: Registers new S3 partitions in Athena for querying.
@@ -34,9 +72,9 @@ The pipelines collectively enable the processing, storage, and analysis of inven
 - **ECS Fargate Task (`api_taskdefinition.json`, `dockerfile-api`)**: Runs the API consumer as a Dockerized service.
 - **Amazon S3**: Stores events, failed records, and Athena query results.
 - **Amazon SNS**: Notifies on validation failures.
-- **Amazon CloudWatch**: Logs pipeline execution.
+- **Amazon CloudWatch**: Logs pipeline execution. -->
 
-### Customer Interactions Pipeline
+<!-- ### Customer Interactions Pipeline
 - **Producer (ECS Fargate, `producer.py`)**: Polls the API (`http://3.248.199.26:8000/api/customer-interaction/`) every 0.5 seconds, validates records, and streams to Kinesis.
 - **Consumer Lambda (`lambda_function.py`)**: Processes Kinesis records, validates, cleans, batches (100 records), and writes Parquet files to `s3://crm-api-data-2025/processed/` with year/month/day/hour partitioning.
 - **Alerting Lambda (`alerting_lambda.py`)**: Queries Athena hourly for negative interactions (`rating <= 2`) and sends SNS alerts.
@@ -56,7 +94,23 @@ The pipelines collectively enable the processing, storage, and analysis of inven
 - **Amazon SNS**: Sends notifications to `arn:aws:sns:us-east-1:985539772768:inventory_alert`.
 - **Amazon CloudWatch**: Logs metrics and execution details.
 
-
+### POS Batch Processing Pipeline
+- **S3 Trigger**: Watches `s3://pos-batch-source/` for daily csv uploads.
+- **Trigger Lambda (`invoke_step_function.py`)**:
+  - Launches a Step Function with the event_time parameter.
+- **Validation Job (pos_validate.py)**:
+  - Validates files and write the validation report to an s3 bucket in json format.
+  - Reject invalid files and move them into a new bucket
+- **Decision State**:
+  - Step Function inspects validation summary.
+  - If no valid files: sends notification and ends process.
+- **Transformation Job (`transform_pos.py`)**:
+  - Cleans, deduplicates, transforms data.
+  - Writes curated data to processed bucket in Delta Lake format.
+  - Computes and upserts KPIs into a separate Delta Lake KPI table.
+- Notifications and Monitoring:
+  - SNS topic for error alerts.
+  - CloudWatch Logs for Lambda, Glue, and Step Functions. -->
 
 ## Prerequisites
 
@@ -83,7 +137,7 @@ The pipelines collectively enable the processing, storage, and analysis of inven
   - Customer: `CRMDataStream`.
 - **SQS Queue**: `crm-dlq` for customer pipeline DLQ.
 
-## Setup Instructions
+<!-- ## Setup Instructions
 
 ### 1. Inventory Batch Processing Pipeline
 
@@ -224,7 +278,8 @@ The pipelines collectively enable the processing, storage, and analysis of inven
    - Set CloudWatch Alarms:
      - `CRMDataConsumerLambdaErrors`: `Errors` >= 1 in 5 min.
      - `CRMDataDLQMessages`: `ApproximateNumberOfMessagesVisible` >= 1 in 5 min.
-   - Monitor SNS topic (`CRMDataPipelineAlerts`) for alerts.
+   - Monitor SNS topic (`CRMDataPipelineAlerts`) for alerts. -->
+
 
 ## Usage
 
@@ -243,8 +298,12 @@ The pipelines collectively enable the processing, storage, and analysis of inven
   - Output: Parquet files in `s3://crm-api-data-2025/processed/`.
   - Visualize in QuickSight; monitor alerts for negative interactions.
 
-## Error Handling
+- **POS Pipeline**:
+  - Input: CSV files in `s3://batch-data-source-v1/pops/`.
+  - Output: Delta Lake table in `s3://misc-gtp-proj/landing_zone/processed/pos/`.
+  - Query via Athena or Delta Lake-based engines.
 
+## Error Handling
 - **Inventory**:
   - Invalid JSONL records stored in `s3://misc-gtp-proj/landing_zone/rejected/inventory/`.
   - SNS notifications for pipeline failures.
@@ -255,6 +314,11 @@ The pipelines collectively enable the processing, storage, and analysis of inven
   - SNS notifications for validation failures.
   - CloudWatch logs for ECS and Lambda.
 
+- **POS**:
+  - Failed records stored in `s3://misc-gtp-proj/landing_zone/rejected/pos/`.
+  - SNS notifications for validation failures.
+  - CloudWatch logs for ECS and Lambda.
+
 - **Customer Interactions**:
   - Invalid records stored in `s3://crm-api-data-2025/invalid/`.
   - Failed records sent to SQS DLQ (`crm-dlq`).
@@ -262,7 +326,6 @@ The pipelines collectively enable the processing, storage, and analysis of inven
   - CloudWatch logs for producer, consumer, and alerting.
 
 ## Monitoring and Governance
-
 - **CloudWatch Metrics**:
   - Inventory: `FilesProcessed`, `FilesSucceeded`, `FilesRejected`, `FilesErrored`.
   - Web: ECS and Lambda logs, SNS failure notifications.
@@ -279,7 +342,6 @@ The pipelines collectively enable the processing, storage, and analysis of inven
   - Audit logs in S3 and CloudWatch for GDPR/CCPA compliance.
 
 ## Troubleshooting
-
 - **Inventory**:
   - **Lambda Failures**: Check CloudWatch logs for `inventory_trigger`.
   - **Glue Failures**: Review logs for `inventory_validator`/`inventory_transform`.
@@ -299,6 +361,7 @@ The pipelines collectively enable the processing, storage, and analysis of inven
 ## Limitations
 
 - **Inventory**: Assumes JSONL input with epoch timestamps.
+- **POS**: Assumes CSV input with epoch timestamps expect data to comme in at the same time
 - **Web Analytics**: Expects JSON API responses, epoch timestamps, and standard partitioning.
 - **Customer Interactions**: Requires millisecond-precision timestamps, assumes JSON API format.
 
@@ -315,6 +378,12 @@ The pipelines collectively enable the processing, storage, and analysis of inven
   - Add throughput/latency metrics.
 
 - **Customer Interactions**:
+  - Integrate Slack/SMS alerts via SNS.
+  - Add metrics for data completeness and validation failures.
+  - Support schema evolution for API changes.
+
+
+- **POS**:
   - Integrate Slack/SMS alerts via SNS.
   - Add metrics for data completeness and validation failures.
   - Support schema evolution for API changes.

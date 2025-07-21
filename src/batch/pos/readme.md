@@ -47,7 +47,7 @@ The pipeline is orchestrated using **AWS Step Functions** with integration to **
 
 ## ETL Workflow Diagram
 
-> *(Insert your AWS Step Function graph image here)*
+![POS Step Function Graph](../../../images/pos/pos_stepfunctions_graph.png)
 
 You can insert a visual of your Step Function workflow to better illustrate the control flow and state transitions.
 
